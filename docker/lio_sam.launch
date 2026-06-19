@@ -1,0 +1,18 @@
+<launch>
+  <!-- Headless LIO_SAM_6AXIS launch for the Sensys data: base velodyne params
+       + our overrides, then the core SLAM nodes. No rviz, no bundled rosbag
+       (scripts/run_lio_sam.sh plays the converted bag and records output). -->
+  <param name="/use_sim_time" value="true" />
+
+  <rosparam file="$(find lio_sam_6axis)/config/params_vlp.yaml" command="load" />
+  <rosparam file="/work/docker/lio_sam_overrides.yaml" command="load" />
+
+  <!-- DataSaver writes the map + TUM trajectory to <saveDirectory><sequence>/.
+       These are read as GLOBAL params (no lio_sam_6axis/ prefix). Point them at
+       the host mount so globalmap_lidar_feature.pcd survives the --rm container.
+       NOTE: DataSaver does `rm -r` on this dir at startup, so keep it dedicated. -->
+  <param name="saveDirectory" value="/work/outputs/test1_liosam/" />
+  <param name="sequence" value="lio" />
+
+  <include file="$(find lio_sam_6axis)/launch/include/module_loam.launch" />
+</launch>

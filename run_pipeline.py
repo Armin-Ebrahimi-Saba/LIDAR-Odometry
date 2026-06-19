@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""End-to-end LiDAR positioning pipeline for the Sensys dataset.
+"""Downstream georeferencing/evaluation pipeline for the Sensys dataset.
 
-Stages (run with --stage, or 'all' to run everything in order):
-  1. timestamps -- pair .laz scans with bag-recorded timestamps
-  2. odometry   -- run KISS-ICP odometry/SLAM -> local poses + 3D map
-  3. align      -- SE(3)-align the local trajectory to GNSS ground truth,
-                    re-express it as lat/lon
-  4. velocity   -- finite-difference the aligned trajectory -> NED velocity
-  5. evaluate   -- RMSE + error-over-time plot vs. ground truth
+On this LIO-SAM branch the local trajectory is produced by LIO_SAM_6AXIS (see
+LIO_SAM_NOTES.md and run_liosam_pipeline.sh), which writes
+``outputs/<run>/poses_local.csv``. These stages are odometry-engine agnostic --
+they only consume that CSV plus the GNSS ground truth:
+
+  1. align     -- SE(3)-align the local trajectory to GNSS, re-express as lat/lon
+  2. velocity  -- finite-difference the aligned trajectory -> NED velocity
+  3. evaluate  -- RMSE + error-over-time plot vs. ground truth
 
 Usage:
-    python run_pipeline.py --config config.yaml
-    python run_pipeline.py --config config.yaml --stage odometry
+    python run_pipeline.py --config config_liosam.yaml --stage align
+    python run_pipeline.py --config config_liosam.yaml            # all three
 """
 import argparse
 from pathlib import Path
@@ -19,15 +20,12 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from sensys_slam.timestamps import build_scan_manifest
-from sensys_slam.lidar_io import LazScanDataset, BagScanDataset
-from sensys_slam.odometry import run_odometry
 from sensys_slam.groundtruth import load_ground_truth_for_run
 from sensys_slam.align import align_and_georeference
 from sensys_slam.velocity import compute_ned_velocity
 from sensys_slam.evaluate import evaluate_against_ground_truth
 
-ALL_STAGES = ["timestamps", "odometry", "align", "velocity", "evaluate"]
+ALL_STAGES = ["align", "velocity", "evaluate"]
 
 
 def load_config(path: str) -> dict:
@@ -37,52 +35,18 @@ def load_config(path: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--config", default="config_liosam.yaml")
     parser.add_argument("--stage", default="all", choices=["all"] + ALL_STAGES)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     out_dir = Path(cfg["paths"]["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = out_dir / "scan_manifest.csv"
 
     stages = ALL_STAGES if args.stage == "all" else [args.stage]
 
-    if "timestamps" in stages:
-        print("\n== Stage 1: building LiDAR scan timestamp manifest ==")
-        build_scan_manifest(
-            bag_dir=cfg["paths"]["bag_dir"],
-            laz_dir=cfg["paths"]["laz_dir"],
-            topic=cfg["run"]["lidar_topic"],
-            out_csv=str(manifest_path),
-        )
-
-    if "odometry" in stages:
-        print("\n== Stage 2: running KISS-ICP odometry/SLAM ==")
-        source = cfg.get("lidar", {}).get("source", "laz")
-        if source == "bag":
-            # Stream /ouster/points directly so per-point `timeoffset` sweep
-            # timing is available for deskew (the .laz exports lost it).
-            print("[odometry] LiDAR source: bag (/ouster/points, deskew-capable)")
-            deskewer = None
-            if cfg.get("lidar", {}).get("imu_deskew", False):
-                from sensys_slam.attitude import load_attitude_deskewer, PX4_ATTITUDE_TOPIC
-                att_topic = cfg.get("lidar", {}).get("attitude_topic", PX4_ATTITUDE_TOPIC)
-                print(f"[odometry] IMU-attitude deskew ON (attitude: {att_topic})")
-                deskewer = load_attitude_deskewer(cfg["paths"]["bag_dir"], att_topic)
-                # We deskew externally with measured attitude, so disable
-                # KISS-ICP's own constant-velocity deskew.
-                cfg.setdefault("kiss_icp", {})["deskew"] = False
-            dataset = BagScanDataset(cfg["paths"]["bag_dir"], cfg["run"]["lidar_topic"], deskewer=deskewer)
-        elif source == "laz":
-            print("[odometry] LiDAR source: laz files")
-            dataset = LazScanDataset(pd.read_csv(manifest_path))
-        else:
-            raise ValueError(f"Unknown lidar.source '{source}' in config (expected 'laz' or 'bag').")
-        run_odometry(dataset, cfg, str(out_dir))
-
     if "align" in stages:
-        print("\n== Stage 3: aligning SLAM trajectory to GNSS ground truth ==")
+        print("\n== Stage: aligning SLAM trajectory to GNSS ground truth ==")
         poses_df = pd.read_csv(out_dir / "poses_local.csv")
         gt_df = load_ground_truth_for_run(cfg)
         traj_df, ref_origin, fit_rmse, _ = align_and_georeference(poses_df, gt_df, cfg)
@@ -101,7 +65,7 @@ def main():
         print(f"[align] wrote {out_dir / 'trajectory_latlon.csv'}")
 
     if "velocity" in stages:
-        print("\n== Stage 4: computing NED velocity ==")
+        print("\n== Stage: computing NED velocity ==")
         traj_df = pd.read_csv(out_dir / "trajectory_latlon.csv")
         vel_cfg = cfg.get("velocity", {})
         vel_df = compute_ned_velocity(
@@ -116,7 +80,7 @@ def main():
         print(f"[velocity] wrote {out_dir / 'velocity_ned.csv'}")
 
     if "evaluate" in stages:
-        print("\n== Stage 5: evaluating against ground truth (RMSE + plot) ==")
+        print("\n== Stage: evaluating against ground truth (RMSE + plot) ==")
         traj_df = pd.read_csv(out_dir / "trajectory_latlon.csv")
         gt_df = load_ground_truth_for_run(cfg)
         with open(out_dir / "alignment_origin.yaml") as f:

@@ -1,0 +1,35 @@
+# Sensys LiDAR positioning pipeline -- LIO_SAM_6AXIS variant.
+#
+# Same dataset/window/ground-truth as config.yaml, but the local trajectory
+# comes from LIO_SAM_6AXIS (ROS1, run in Docker) instead of KISS-ICP. The
+# odometry engine is irrelevant to the align/velocity/evaluate stages -- they
+# only consume outputs/<output_dir>/poses_local.csv -- so only output_dir
+# changes here (keeps the KISS-ICP results in outputs/test1/ intact for
+# comparison). The lidar/kiss_icp blocks are unused in this variant.
+
+paths:
+  bag_dir: "./data/rosbag"
+  laz_dir: "./data/rosbag/rosbag_data/laz_clouds"
+  gnss_csv: "./data/xtrack_gnss_corrected/xtrack_global_position_t12.csv"
+  output_dir: "./outputs/test1_liosam"
+
+run:
+  name: "Test1"
+  lidar_topic: "/ouster/points"
+  start_time: 1780397390.972
+  end_time: 1780398213.329
+
+ground_truth:
+  require_lat_lon_valid: true
+  require_alt_valid: true
+  crop_margin_s: 0.0
+
+alignment:
+  max_time_diff_s: 0.15
+
+velocity:
+  smooth_window: 11
+  smooth_polyorder: 2
+
+evaluation:
+  plot_title: "Test1 -- LIO-SAM (6-axis) vs GNSS Ground Truth"
