@@ -20,7 +20,7 @@ import pandas as pd
 import yaml
 
 from sensys_slam.timestamps import build_scan_manifest
-from sensys_slam.lidar_io import LazScanDataset
+from sensys_slam.lidar_io import LazScanDataset, BagScanDataset
 from sensys_slam.odometry import run_odometry
 from sensys_slam.groundtruth import load_ground_truth_for_run
 from sensys_slam.align import align_and_georeference
@@ -59,8 +59,26 @@ def main():
 
     if "odometry" in stages:
         print("\n== Stage 2: running KISS-ICP odometry/SLAM ==")
-        manifest_df = pd.read_csv(manifest_path)
-        dataset = LazScanDataset(manifest_df)
+        source = cfg.get("lidar", {}).get("source", "laz")
+        if source == "bag":
+            # Stream /ouster/points directly so per-point `timeoffset` sweep
+            # timing is available for deskew (the .laz exports lost it).
+            print("[odometry] LiDAR source: bag (/ouster/points, deskew-capable)")
+            deskewer = None
+            if cfg.get("lidar", {}).get("imu_deskew", False):
+                from sensys_slam.attitude import load_attitude_deskewer, PX4_ATTITUDE_TOPIC
+                att_topic = cfg.get("lidar", {}).get("attitude_topic", PX4_ATTITUDE_TOPIC)
+                print(f"[odometry] IMU-attitude deskew ON (attitude: {att_topic})")
+                deskewer = load_attitude_deskewer(cfg["paths"]["bag_dir"], att_topic)
+                # We deskew externally with measured attitude, so disable
+                # KISS-ICP's own constant-velocity deskew.
+                cfg.setdefault("kiss_icp", {})["deskew"] = False
+            dataset = BagScanDataset(cfg["paths"]["bag_dir"], cfg["run"]["lidar_topic"], deskewer=deskewer)
+        elif source == "laz":
+            print("[odometry] LiDAR source: laz files")
+            dataset = LazScanDataset(pd.read_csv(manifest_path))
+        else:
+            raise ValueError(f"Unknown lidar.source '{source}' in config (expected 'laz' or 'bag').")
         run_odometry(dataset, cfg, str(out_dir))
 
     if "align" in stages:

@@ -1,4 +1,4 @@
-"""Run KISS-ICP odometry/SLAM over a sequence of .laz scans.
+"""Run KISS-ICP odometry/SLAM over a sequence of LiDAR scans.
 
 Produces, in the local SLAM frame (arbitrary origin = first scan pose):
   - poses_local.csv  : timestamp, x, y, z, qx, qy, qz, qw
@@ -17,8 +17,6 @@ from tqdm import tqdm
 from kiss_icp.config import KISSConfig
 from kiss_icp.kiss_icp import KissICP
 
-from .lidar_io import LazScanDataset
-
 
 def build_kiss_config(cfg: dict) -> KISSConfig:
     kc = cfg.get("kiss_icp", {})
@@ -31,8 +29,13 @@ def build_kiss_config(cfg: dict) -> KISSConfig:
     return config
 
 
-def run_odometry(dataset: LazScanDataset, cfg: dict, output_dir: str) -> pd.DataFrame:
-    """Run KISS-ICP over every scan in `dataset` and write poses + map to disk."""
+def run_odometry(dataset, cfg: dict, output_dir: str) -> pd.DataFrame:
+    """Run KISS-ICP over every scan in `dataset` and write poses + map to disk.
+
+    `dataset` is any object exposing `len()` and `iter_scans()` yielding
+    `(timestamp_s, points, point_times)` -- e.g. LazScanDataset or
+    BagScanDataset from sensys_slam.lidar_io.
+    """
     import open3d as o3d
 
     output_dir = Path(output_dir)
@@ -45,15 +48,16 @@ def run_odometry(dataset: LazScanDataset, cfg: dict, output_dir: str) -> pd.Data
         raise RuntimeError("Dataset is empty -- nothing to process.")
 
     records = []
-    for idx in tqdm(range(n), desc="KISS-ICP odometry"):
-        frame, point_times = dataset[idx]
+    for timestamp, frame, point_times in tqdm(
+        dataset.iter_scans(), total=n, desc="KISS-ICP odometry"
+    ):
         odometry.register_frame(frame, point_times)
         pose = odometry.last_pose  # 4x4 homogeneous transform
         t = pose[:3, 3]
         q = Rotation.from_matrix(pose[:3, :3]).as_quat()  # [x, y, z, w]
         records.append(
             {
-                "timestamp": dataset.scan_timestamp(idx),
+                "timestamp": timestamp,
                 "x": t[0], "y": t[1], "z": t[2],
                 "qx": q[0], "qy": q[1], "qz": q[2], "qw": q[3],
             }
