@@ -1,0 +1,56 @@
+# Sensys LiDAR positioning pipeline -- configuration
+#
+# Paths below match the project layout with data/ at the repo root (see
+# README.md Section 5). Run everything from the repo root so these relative
+# paths resolve correctly. Everything else has sensible defaults pulled
+# from the inventory report.
+
+paths:
+  # Folder containing metadata.yaml + rosbag_0.db3 (and rosbag_data/ alongside
+  # it). Per your tree, that's the rosbag/ folder directly -- NOT the
+  # "Location Person GNSS" subfolder, which is a separate, unrelated GNSS
+  # export (not used by this pipeline; ground truth comes from
+  # xtrack_gnss_corrected/ instead).
+  bag_dir: "./data/rosbag"
+
+  # Folder containing the individual cloud_##########.laz files
+  laz_dir: "./data/rosbag/rosbag_data/laz_clouds"
+
+  # Corrected GNSS reference trajectory (ground truth)
+  gnss_csv: "./data/xtrack_gnss_corrected/xtrack_global_position_t12.csv"
+
+  # Where all pipeline outputs for this run get written
+  output_dir: "./outputs/test1"
+
+run:
+  name: "Test1"
+  lidar_topic: "/ouster/points"
+  # Run time window in Unix epoch seconds, from the inventory report (5.2).
+  # Test1: 1780397390.972 -> 1780398213.329
+  # Test2: 1780398327.532 -> 1780398929.389
+  start_time: 1780397390.972
+  end_time: 1780398213.329
+
+kiss_icp:
+  max_range: 80       # meters; tune down if you see far-away outliers in the map
+  min_range: 4         # meters; filters out points too close to the sensor body
+  voxel_size: null       # null = auto (max_range / 100), per KISS-ICP's own heuristic
+  deskew: false          # set true only if your .laz files have a usable gps_time field
+                          # (scripts/inspect_bag.py + lidar_io.read_laz_scan will tell you)
+
+ground_truth:
+  require_lat_lon_valid: true   # drop rows where lat_lon_valid == False, if column exists
+  require_alt_valid: true       # drop rows where alt_valid == False, if column exists
+  crop_margin_s: 0.0             # extra seconds to trim beyond start/end if you still see
+                                  # edge jumps in the error plot after the basic crop
+
+alignment:
+  max_time_diff_s: 0.15   # max gap allowed when matching a SLAM pose to its nearest GT sample
+
+velocity:
+  smooth_window: 11       # odd window length (samples) for position smoothing before
+                            # differentiating; set to 0 to differentiate raw positions
+  smooth_polyorder: 2
+
+evaluation:
+  plot_title: "Test1 -- LiDAR Odometry vs GNSS Ground Truth"
