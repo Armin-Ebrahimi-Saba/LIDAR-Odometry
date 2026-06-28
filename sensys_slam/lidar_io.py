@@ -138,19 +138,25 @@ class BagScanDataset:
     normalized to [0, 1] and yielded so KISS-ICP's constant-velocity deskew can
     use it. Scan timestamps are the bag-recorded message times (Unix seconds).
 
-    If `deskewer` is given (an attitude.AttitudeDeskewer), each sweep is instead
-    rotation-deskewed here with measured PX4 attitude and yielded with empty
-    per-point times (KISS-ICP's own deskew should then be left off). The raw
-    `timeoffset` field is assumed to be in milliseconds.
+    If `extrinsic` (3x3) is given, each scan is rotated from the Ouster sensor
+    frame into the Pixhawk FRD body frame (see sensys_slam.frames) before any
+    deskew, so the clouds share the PX4 attitude's convention.
+
+    If `deskewer` is given (an attitude.AttitudeDeskewer), each sweep is then
+    rotation-deskewed here with measured PX4 attitude (body->NED) and yielded
+    with empty per-point times (KISS-ICP's own deskew should then be left off).
+    The raw `timeoffset` field is assumed to be in milliseconds.
 
     `frame_start`/`frame_end` select a closed range of scan indices to process
     (`frame_end` inclusive; None = until the last scan).
     """
 
-    def __init__(self, bag_dir: str, topic: str, deskewer=None, frame_start=0, frame_end=None):
+    def __init__(self, bag_dir: str, topic: str, deskewer=None, extrinsic=None,
+                 frame_start=0, frame_end=None):
         self.bag_dir = bag_dir
         self.topic = topic
         self.deskewer = deskewer
+        self.extrinsic = None if extrinsic is None else np.asarray(extrinsic, dtype=np.float64)
         self.frame_start = int(frame_start or 0)
         self.frame_end = None if frame_end is None else int(frame_end)
         self._typestore = get_typestore(Stores.LATEST)
@@ -181,8 +187,12 @@ class BagScanDataset:
                 t_s = t_ns * 1e-9
                 if self.deskewer is not None:
                     points, raw_t = read_pointcloud2_scan(msg, normalize=False)
+                    if self.extrinsic is not None:
+                        points = points @ self.extrinsic.T
                     points = self.deskewer.deskew(points, raw_t / 1000.0, t_s)
                     yield t_s, points, np.array([], dtype=np.float64)
                 else:
                     points, point_times = read_pointcloud2_scan(msg)
+                    if self.extrinsic is not None:
+                        points = points @ self.extrinsic.T
                     yield t_s, points, point_times

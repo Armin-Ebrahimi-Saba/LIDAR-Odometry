@@ -47,12 +47,22 @@ lidar:
   #            anything (kiss_icp.data.deskew below).
   source: "bag"
 
+  # Take the Pixhawk coordinate system (FRD: X-forward, Y-right, Z-down) as the
+  # body frame and express LiDAR scans in it, so the clouds share the PX4
+  # attitude's convention (needed for correct attitude deskew / fusion). The
+  # default LiDAR->body rotation assumes the Ouster (FLU: X-fwd, Y-left, Z-up) is
+  # mounted axis-aligned with the Pixhawk, so only the axis convention differs
+  # (180 deg about X). Set extrinsic_rpy_deg (intrinsic xyz, degrees) to the true
+  # mounting rotation if known. See sensys_slam/frames.py.
+  body_frame: true
+  extrinsic_rpy_deg: null   # null -> use the FLU->FRD convention default
+
   # Optional: deskew each sweep with measured PX4 attitude
   # (/fmu/out/vehicle_attitude, ~100 Hz) instead of KISS-ICP's constant-velocity
   # model. Corrects only the rotational distortion; requires source: bag. When
   # true, KISS-ICP's own deskew (kiss_icp.data.deskew) is forced off.
   # Note /ouster/imu_att is all-identity in this bag and cannot be used.
-  imu_deskew: true
+  imu_deskew: false
   attitude_topic: "/fmu/out/vehicle_attitude"
 
 kiss_icp:

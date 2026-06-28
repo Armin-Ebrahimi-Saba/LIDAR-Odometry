@@ -92,6 +92,12 @@ def main():
         source = cfg.get("lidar", {}).get("source", "laz")
         if source == "bag":
             print("[odometry] LiDAR source: bag (/ouster/points)")
+            # Optional: express scans in the Pixhawk FRD body frame (so they
+            # share the PX4 attitude's convention) -- see sensys_slam.frames.
+            from sensys_slam.frames import build_lidar_to_body
+            extrinsic = build_lidar_to_body(cfg)
+            if extrinsic is not None:
+                print("[odometry] body frame: Pixhawk FRD (LiDAR->body extrinsic applied)")
             # Optional: deskew each sweep with measured PX4 attitude instead of
             # KISS-ICP's constant-velocity model. When on, the cloud is already
             # rotation-compensated, so KISS-ICP's own deskew is forced off.
@@ -103,7 +109,7 @@ def main():
                 deskewer = load_attitude_deskewer(cfg["paths"]["bag_dir"], att_topic)
                 cfg.setdefault("kiss_icp", {}).setdefault("data", {})["deskew"] = False
             dataset = BagScanDataset(cfg["paths"]["bag_dir"], cfg["run"]["lidar_topic"],
-                                     deskewer=deskewer,
+                                     deskewer=deskewer, extrinsic=extrinsic,
                                      frame_start=frame_start, frame_end=frame_end)
         elif source == "laz":
             print("[odometry] LiDAR source: laz files")
