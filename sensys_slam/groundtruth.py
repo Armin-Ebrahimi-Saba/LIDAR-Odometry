@@ -1,15 +1,10 @@
 """Load, time-crop and validity-filter the corrected GNSS ground-truth
 trajectory (`xtrack_global_position_t12.csv`).
 
-Per the project instructions, this corrected/filtered global-position CSV
--- not the raw `xtrack_gps_position_t12.csv` -- is the recommended ground
-truth. The raw GPS file's `fix_type`/`eph` columns are not present in the
-corrected file and are not used here; they only matter if you choose to
-cross-check against the raw GPS solution separately.
-
-The corrected file still has noise/jumps near the start and end (covering a
-wider pre/post-lock window than either test run), so it must be cropped to
-the run's actual time window before use.
+This is PX4's filtered `vehicle_global_position` (the recommended ground
+truth). One file covers both datasets, so it must be cropped to the run's time
+window before use. The project intro notes `timestamp_sample` is the key shared
+with the rosbag, so cropping/matching prefer that column when present.
 """
 import pandas as pd
 
@@ -18,8 +13,13 @@ def load_global_position(csv_path: str) -> pd.DataFrame:
     return pd.read_csv(csv_path)
 
 
-def crop_by_time(df: pd.DataFrame, start: float, end: float, time_col: str = "timestamp") -> pd.DataFrame:
-    return df[(df[time_col] >= start) & (df[time_col] <= end)].reset_index(drop=True)
+def _time_col(df: pd.DataFrame) -> str:
+    return "timestamp_sample" if "timestamp_sample" in df.columns else "timestamp"
+
+
+def crop_by_time(df: pd.DataFrame, start: float, end: float) -> pd.DataFrame:
+    col = _time_col(df)
+    return df[(df[col] >= start) & (df[col] <= end)].reset_index(drop=True)
 
 
 def filter_valid(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
@@ -33,11 +33,10 @@ def filter_valid(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 
 def load_ground_truth_for_run(cfg: dict) -> pd.DataFrame:
-    """Load the corrected global-position CSV, crop it to the configured run
-    window (plus optional extra margin to trim residual edge noise), and
-    drop rows flagged invalid."""
-    paths = cfg["paths"]
-    run = cfg["run"]
+    """Load the corrected CSV, crop to the run window (+ optional margin), and
+    drop rows flagged invalid. The returned frame always carries a `timestamp`
+    column for downstream matching (set to the shared key if needed)."""
+    paths, run = cfg["paths"], cfg["run"]
     margin = cfg.get("ground_truth", {}).get("crop_margin_s", 0.0)
 
     df = load_global_position(paths["gnss_csv"])
@@ -47,8 +46,11 @@ def load_ground_truth_for_run(cfg: dict) -> pd.DataFrame:
     if df.empty:
         raise RuntimeError(
             "Ground truth is empty after cropping/filtering. Check that "
-            "run.start_time / run.end_time in config.yaml fall within the "
-            "CSV's actual timestamp range, and that the timestamp column "
-            "name matches (expected: 'timestamp')."
+            "run.start_time / run.end_time fall within the CSV's timestamp "
+            "range, and that the timestamp column name matches."
         )
+
+    # Downstream (align/evaluate) matches on a 'timestamp' column; make it the
+    # shared key so it lines up with the rosbag/odometry times.
+    df["timestamp"] = df[_time_col(df)].values
     return df

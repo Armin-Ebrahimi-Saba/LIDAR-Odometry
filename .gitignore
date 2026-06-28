@@ -8,6 +8,11 @@ outputs/
 *.pcd
 *.zip
 
+# ---- External clones / runtime caches (installed/used, not vendored) ----
+kiss-icp/
+px4_msgs/
+.ros/
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

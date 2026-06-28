@@ -1,35 +1,60 @@
-"""Load LiDAR scans for the KISS-ICP `register_frame` loop, either from the
-per-frame `.laz` exports or by streaming the rosbag's `/ouster/points` topic
-directly.
+"""Load LiDAR scans for the odometry loop, either from the per-frame `.laz`
+exports or by streaming the rosbag's `/ouster/points` topic directly.
 
-The bag-backed reader (`BagScanDataset`) exists because the `.laz` exports
-lost the per-point sweep timing -- their `gps_time` field is all zeros -- so
-deskewing is impossible from `.laz`. The raw PointCloud2 messages still carry
-per-point time in a non-standard `timeoffset` field (milliseconds across the
-~100 ms sweep), which the reader normalizes to [0, 1] so KISS-ICP can deskew.
+The bag-backed reader (`BagScanDataset`) exists because the `.laz` exports lost
+the per-point sweep timing (their `gps_time` is all zeros), so deskewing is
+impossible from `.laz`. The raw PointCloud2 messages still carry per-point time
+in a non-standard `timeoffset` field (milliseconds across the ~100 ms sweep),
+which the reader normalizes to [0, 1] for the constant-velocity deskewer.
 
 Both datasets expose the same minimal interface used by `run_odometry`:
 `len(dataset)` and `iter_scans()` yielding `(timestamp_s, points, point_times)`.
+
+PointCloud2 parsing is done here with numpy (no external dependency): a
+structured dtype is built from the message's `fields` and `point_step`.
 """
 from pathlib import Path
 
 import numpy as np
 import laspy
-
 from rosbags.highlevel import AnyReader
 from rosbags.typesys import Stores, get_typestore
-from kiss_icp.tools.point_cloud2 import read_points
 
+# sensor_msgs/PointField datatype code -> numpy dtype
+_PF_TO_NP = {
+    1: np.int8, 2: np.uint8, 3: np.int16, 4: np.uint16,
+    5: np.int32, 6: np.uint32, 7: np.float32, 8: np.float64,
+}
 # Per-point sweep-time field names we know how to use, in priority order.
-# Ouster's ROS2 PointCloud2 names it `timeoffset`; the others cover the
-# conventional names so this also works on more standard clouds.
 _POINT_TIME_FIELDS = ("timeoffset", "t", "time", "timestamp")
 
 
+def read_points(msg, field_names):
+    """Parse a sensor_msgs/PointCloud2 into a numpy structured array containing
+    the requested `field_names`. Honors per-field offsets and the point stride."""
+    by_name = {f.name: f for f in msg.fields}
+    names, formats, offsets = [], [], []
+    for name in field_names:
+        if name not in by_name:
+            continue
+        f = by_name[name]
+        np_t = np.dtype(_PF_TO_NP[f.datatype])
+        if msg.is_bigendian:
+            np_t = np_t.newbyteorder(">")
+        names.append(name)
+        formats.append(np_t)
+        offsets.append(f.offset)
+
+    dtype = np.dtype({"names": names, "formats": formats,
+                      "offsets": offsets, "itemsize": msg.point_step})
+    n = msg.width * msg.height
+    raw = np.frombuffer(bytes(msg.data), dtype=dtype, count=n)
+    return raw
+
+
 def _normalize_point_times(t: np.ndarray) -> np.ndarray:
-    """Normalize per-point timestamps to [0, 1] across the scan, which is the
-    convention KISS-ICP's deskewer expects (see kiss_icp.datasets.mulran).
-    Returns all-zeros if there is no usable spread."""
+    """Normalize per-point timestamps to [0, 1] across the scan. Returns
+    all-zeros if there is no usable spread."""
     t = np.asarray(t, dtype=np.float64)
     if t.size == 0:
         return np.array([], dtype=np.float64)
@@ -39,43 +64,13 @@ def _normalize_point_times(t: np.ndarray) -> np.ndarray:
     return (t - t.min()) / spread
 
 
-def read_laz_scan(filepath: str):
-    """Read one `.laz` scan.
-
-    Returns:
-        points: (N, 3) float64 array of x, y, z in the Ouster sensor frame.
-        point_times: (N,) float64 array of per-point relative timestamps in
-            [0, 1] for deskewing, or an empty array if the LAS has no usable
-            per-point time. The per-frame `.laz` exports in this dataset
-            carry an all-zero `gps_time`, so this returns an empty array and
-            deskewing is not possible from `.laz` -- use `BagScanDataset` for
-            that. Set `kiss_icp.deskew: true` only with a source that
-            provides real per-point time.
-    """
-    las = laspy.read(filepath)
-    points = np.column_stack((las.x, las.y, las.z)).astype(np.float64)
-
-    if "gps_time" in set(las.point_format.dimension_names):
-        point_times = _normalize_point_times(np.asarray(las.gps_time, dtype=np.float64))
-        # An all-zero / constant gps_time (this dataset's case) normalizes to
-        # zeros, which carries no deskew information; signal "no time" instead.
-        if np.any(point_times > 0):
-            return points, point_times
-
-    return points, np.array([], dtype=np.float64)
-
-
 def read_pointcloud2_scan(msg, normalize: bool = True):
-    """Read one PointCloud2 message into `(points, point_times)`.
+    """Read one PointCloud2 into `(points, point_times)`.
 
     points: (N, 3) float64 in the sensor frame, NaN rows dropped.
-    point_times: (N,) float64 from a `timeoffset` field (or the conventional
-        t/time/timestamp names) when present, else an empty array. With
-        `normalize=True` these are scaled to [0, 1] for KISS-ICP's deskewer;
-        with `normalize=False` the raw field values are returned (e.g. Ouster
-        `timeoffset` in milliseconds), as needed for external IMU deskew.
-        NaN-xyz rows are dropped from both arrays together so points and times
-        stay index-aligned.
+    point_times: (N,) float64 from a `timeoffset`/t/time/timestamp field if
+        present, else empty. With `normalize=True` scaled to [0, 1]; with
+        `normalize=False` the raw values (e.g. Ouster `timeoffset` in ms).
     """
     field_names = {f.name for f in msg.fields}
     t_field = next((n for n in _POINT_TIME_FIELDS if n in field_names), None)
@@ -96,6 +91,22 @@ def read_pointcloud2_scan(msg, normalize: bool = True):
     return points, point_times
 
 
+def read_laz_scan(filepath: str):
+    """Read one `.laz` scan -> (points (N,3) float64, point_times).
+
+    The per-frame `.laz` exports carry an all-zero `gps_time`, so per-point
+    times normalize to zeros (no deskew info) and an empty array is returned;
+    use `BagScanDataset` for deskewing.
+    """
+    las = laspy.read(filepath)
+    points = np.column_stack((las.x, las.y, las.z)).astype(np.float64)
+    if "gps_time" in set(las.point_format.dimension_names):
+        point_times = _normalize_point_times(np.asarray(las.gps_time, dtype=np.float64))
+        if np.any(point_times > 0):
+            return points, point_times
+    return points, np.array([], dtype=np.float64)
+
+
 class LazScanDataset:
     """Sequence of `.laz` scans, indexed in manifest order.
 
@@ -103,48 +114,45 @@ class LazScanDataset:
     sensys_slam.timestamps.build_scan_manifest).
     """
 
-    def __init__(self, manifest_df):
-        self.manifest = manifest_df.reset_index(drop=True)
+    def __init__(self, manifest_df, frame_start=0, frame_end=None):
+        m = manifest_df.reset_index(drop=True)
+        end = len(m) - 1 if frame_end is None else min(int(frame_end), len(m) - 1)
+        self.manifest = m.iloc[int(frame_start or 0):end + 1].reset_index(drop=True)
 
     def __len__(self):
         return len(self.manifest)
-
-    def __getitem__(self, idx):
-        row = self.manifest.iloc[idx]
-        return read_laz_scan(row["filepath"])
 
     def scan_timestamp(self, idx) -> float:
         return float(self.manifest.iloc[idx]["timestamp"])
 
     def iter_scans(self):
-        """Yield `(timestamp_s, points, point_times)` in manifest order."""
         for idx in range(len(self)):
-            points, point_times = self[idx]
+            points, point_times = read_laz_scan(self.manifest.iloc[idx]["filepath"])
             yield self.scan_timestamp(idx), points, point_times
 
 
 class BagScanDataset:
     """Stream LiDAR scans directly from the rosbag's `/ouster/points` topic.
 
-    Unlike the `.laz` exports, the raw PointCloud2 messages still carry the
-    per-point sweep timing (`timeoffset`), so this is the source to use when
-    `kiss_icp.deskew: true`. Scan timestamps come from the bag-recorded
-    message time (Unix seconds), identical to the manifest built in
-    sensys_slam.timestamps.
+    The raw PointCloud2 messages carry per-point sweep timing (`timeoffset`),
+    normalized to [0, 1] and yielded so KISS-ICP's constant-velocity deskew can
+    use it. Scan timestamps are the bag-recorded message times (Unix seconds).
 
-    Scans are streamed sequentially (the odometry loop consumes them in
-    order); there is no random access by index.
+    If `deskewer` is given (an attitude.AttitudeDeskewer), each sweep is instead
+    rotation-deskewed here with measured PX4 attitude and yielded with empty
+    per-point times (KISS-ICP's own deskew should then be left off). The raw
+    `timeoffset` field is assumed to be in milliseconds.
 
-    If `deskewer` is given (an attitude.AttitudeDeskewer), each sweep is
-    motion-compensated with measured attitude here and yielded with empty
-    per-point times, so KISS-ICP's own (constant-velocity) deskew should be
-    left off. The raw `timeoffset` field is assumed to be in milliseconds.
+    `frame_start`/`frame_end` select a closed range of scan indices to process
+    (`frame_end` inclusive; None = until the last scan).
     """
 
-    def __init__(self, bag_dir: str, topic: str, deskewer=None):
+    def __init__(self, bag_dir: str, topic: str, deskewer=None, frame_start=0, frame_end=None):
         self.bag_dir = bag_dir
         self.topic = topic
         self.deskewer = deskewer
+        self.frame_start = int(frame_start or 0)
+        self.frame_end = None if frame_end is None else int(frame_end)
         self._typestore = get_typestore(Stores.LATEST)
         with AnyReader([Path(bag_dir)], default_typestore=self._typestore) as reader:
             conns = [c for c in reader.connections if c.topic == topic]
@@ -154,20 +162,24 @@ class BagScanDataset:
                     f"Topic '{topic}' not found in bag at {bag_dir}.\n"
                     f"Available topics:\n  " + "\n  ".join(available)
                 )
-            self._n = sum(c.msgcount for c in conns)
+            total = sum(c.msgcount for c in conns)
+        last = total - 1 if self.frame_end is None else min(self.frame_end, total - 1)
+        self._n = max(0, last - self.frame_start + 1)
 
     def __len__(self):
         return self._n
 
     def iter_scans(self):
-        """Yield `(timestamp_s, points, point_times)` in bag (capture) order."""
         with AnyReader([Path(self.bag_dir)], default_typestore=self._typestore) as reader:
             conns = [c for c in reader.connections if c.topic == self.topic]
-            for connection, timestamp_ns, rawdata in reader.messages(connections=conns):
+            for i, (connection, t_ns, rawdata) in enumerate(reader.messages(connections=conns)):
+                if i < self.frame_start:
+                    continue
+                if self.frame_end is not None and i > self.frame_end:
+                    break
                 msg = reader.deserialize(rawdata, connection.msgtype)
-                t_s = timestamp_ns * 1e-9
+                t_s = t_ns * 1e-9
                 if self.deskewer is not None:
-                    # External IMU-attitude deskew: raw timeoffset is in ms.
                     points, raw_t = read_pointcloud2_scan(msg, normalize=False)
                     points = self.deskewer.deskew(points, raw_t / 1000.0, t_s)
                     yield t_s, points, np.array([], dtype=np.float64)

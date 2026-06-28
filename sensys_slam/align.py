@@ -1,19 +1,19 @@
 """Tie the local SLAM trajectory to the GNSS ground truth.
 
-The SLAM trajectory lives in an arbitrary local Cartesian frame (origin =
-first scan pose, axes = whatever the LiDAR's initial orientation happened to
-be). The ground truth lives in WGS84 lat/lon/alt. To compare or merge them
-we need a rigid SE(3) transform (rotation + translation, scale fixed to 1
-since both are already metric) that maps the SLAM frame onto a local ENU
-frame anchored at the ground truth.
+The SLAM trajectory lives in a world frame whose origin is the first GNSS
+ground-truth point (seeded into the odometry), but whose *orientation* is still
+arbitrary (the LiDAR's initial heading). This stage finds the rigid SE(3)
+transform that brings it onto the GNSS ENU frame.
 
 Procedure:
-  1. Convert the ground truth to ENU meters around its own first sample.
-  2. Time-match SLAM poses to ground-truth samples (nearest-neighbor within
-     a tolerance).
-  3. Estimate R, t via Umeyama/Kabsch (no scaling) from the matched pairs.
-  4. Apply R, t to the *entire* SLAM trajectory (not just the matched
-     subset), then convert the result back to lat/lon.
+  1. Convert the ground truth to ENU metres around its own first sample.
+  2. Time-match SLAM poses to ground-truth samples (nearest-neighbour within a
+     tolerance).
+  3. Estimate R, t with the *first* matched pair pinned exactly -- the SLAM
+     start is anchored onto the GNSS start and the rotation about that anchor
+     is fit to the rest -- so the error curve starts at 0 and grows as drift
+     from a known origin. (A global Umeyama best fit is also available.)
+  4. Apply R, t to the entire trajectory, then convert back to lat/lon.
 """
 import numpy as np
 import pandas as pd
@@ -22,107 +22,96 @@ from .geo import geodetic_to_enu, enu_to_geodetic
 
 
 def umeyama_alignment(src: np.ndarray, dst: np.ndarray):
-    """Estimate rotation R and translation t such that dst ~= (R @ src.T).T + t.
-
-    Scale is fixed to 1 because both point sets are already in meters.
-    src, dst: (N, 3) arrays of corresponding points, N >= 3.
-    Returns: R (3,3), t (3,)
-    """
+    """Global least-squares R, t (scale fixed to 1) with dst ~= (R @ src.T).T + t."""
     if src.shape != dst.shape or src.shape[0] < 3:
         raise ValueError("umeyama_alignment needs matching (N>=3, 3) arrays")
-
-    mu_src, mu_dst = src.mean(axis=0), dst.mean(axis=0)
+    mu_src, mu_dst = src.mean(0), dst.mean(0)
     src_c, dst_c = src - mu_src, dst - mu_dst
-
     cov = dst_c.T @ src_c / src.shape[0]
     U, _, Vt = np.linalg.svd(cov)
     S = np.eye(3)
     if np.linalg.det(U) * np.linalg.det(Vt) < 0:
         S[-1, -1] = -1.0
     R = U @ S @ Vt
-    t = mu_dst - R @ mu_src
-    return R, t
+    return R, mu_dst - R @ mu_src
 
 
-def nearest_time_match(query_times: np.ndarray, ref_times: np.ndarray, max_diff: float):
-    """For each value in `query_times`, find the index of the nearest value
-    in `ref_times`. Only pairs within `max_diff` seconds are kept.
+def anchored_alignment(src: np.ndarray, dst: np.ndarray):
+    """Rigid R, t with the FIRST pair pinned exactly (`R @ src[0] + t == dst[0]`)
+    and the rotation about that anchor fit to the rest (orthogonal Procrustes).
+    Error at t=0 is zero; RMSE is higher than Umeyama but reads as drift from a
+    known origin."""
+    if src.shape != dst.shape or src.shape[0] < 3:
+        raise ValueError("anchored_alignment needs matching (N>=3, 3) arrays")
+    src0, dst0 = src[0], dst[0]
+    src_c, dst_c = src - src0, dst - dst0
+    cov = dst_c.T @ src_c
+    U, _, Vt = np.linalg.svd(cov)
+    S = np.eye(3)
+    if np.linalg.det(U) * np.linalg.det(Vt) < 0:
+        S[-1, -1] = -1.0
+    R = U @ S @ Vt
+    return R, dst0 - R @ src0
 
-    Returns (query_idx, ref_idx): index arrays into the original arrays for
-    the kept matches, same length, ordered by query_idx.
-    """
+
+def nearest_time_match(query_times, ref_times, max_diff):
+    """For each query time, index of the nearest ref time; keep pairs within
+    `max_diff`. Returns (query_idx, ref_idx)."""
     ref_times = np.asarray(ref_times)
     order = np.argsort(ref_times)
     ref_sorted = ref_times[order]
-
-    pos = np.searchsorted(ref_sorted, query_times)
-    pos = np.clip(pos, 1, len(ref_sorted) - 1)
+    pos = np.clip(np.searchsorted(ref_sorted, query_times), 1, len(ref_sorted) - 1)
     left, right = pos - 1, pos
-    left_diff = np.abs(query_times - ref_sorted[left])
-    right_diff = np.abs(query_times - ref_sorted[right])
-    use_left = left_diff <= right_diff
-    nearest_sorted_idx = np.where(use_left, left, right)
-    nearest_diff = np.where(use_left, left_diff, right_diff)
-
-    nearest_ref_idx = order[nearest_sorted_idx]
+    use_left = np.abs(query_times - ref_sorted[left]) <= np.abs(query_times - ref_sorted[right])
+    nearest_sorted = np.where(use_left, left, right)
+    nearest_diff = np.where(use_left,
+                            np.abs(query_times - ref_sorted[left]),
+                            np.abs(query_times - ref_sorted[right]))
+    nearest_ref = order[nearest_sorted]
     valid = nearest_diff <= max_diff
-    query_idx = np.nonzero(valid)[0]
-    ref_idx = nearest_ref_idx[valid]
-    return query_idx, ref_idx
+    return np.nonzero(valid)[0], nearest_ref[valid]
 
 
-def align_and_georeference(poses_df: pd.DataFrame, gt_df: pd.DataFrame, cfg: dict):
+def align_and_georeference(poses_df: pd.DataFrame, gt_df: pd.DataFrame, cfg: dict,
+                           ref_origin=None):
+    """Returns (traj_latlon_df, ref_origin, fit_rmse_m, (R, t)).
+
+    If `ref_origin` (lat0, lon0, alt0) is given it is used as the ENU tangent
+    point (so it matches the origin the odometry was seeded with); otherwise
+    the ground truth's first sample is used.
     """
-    poses_df: columns timestamp, x, y, z, qx, qy, qz, qw (local SLAM frame)
-    gt_df:    columns timestamp, lat, lon, alt (WGS84, already cropped/filtered)
+    if ref_origin is None:
+        ref_origin = (float(gt_df["lat"].iloc[0]), float(gt_df["lon"].iloc[0]),
+                      float(gt_df["alt"].iloc[0]))
+    lat0, lon0, alt0 = ref_origin
 
-    Returns:
-        traj_latlon_df : timestamp, lat, lon, alt, x_enu, y_enu, z_enu for
-                          ALL SLAM poses, re-expressed in the ground truth's
-                          ENU/geodetic frame.
-        ref_origin      : (lat0, lon0, alt0) tangent point used for ENU.
-        fit_rmse_m      : RMSE of the alignment fit itself, on the matched
-                          calibration points only. This is a sanity check on
-                          how well the rigid-transform assumption holds --
-                          NOT the trajectory's overall accuracy (compute that
-                          separately in sensys_slam.evaluate against the
-                          full, independent ground-truth series).
-        (R, t)          : the estimated rotation matrix and translation.
-    """
-    lat0 = float(gt_df["lat"].iloc[0])
-    lon0 = float(gt_df["lon"].iloc[0])
-    alt0 = float(gt_df["alt"].iloc[0])
-
-    gt_enu = geodetic_to_enu(
-        gt_df["lat"].values, gt_df["lon"].values, gt_df["alt"].values, lat0, lon0, alt0
-    )
+    gt_enu = geodetic_to_enu(gt_df["lat"].values, gt_df["lon"].values,
+                             gt_df["alt"].values, lat0, lon0, alt0)
 
     max_diff = cfg.get("alignment", {}).get("max_time_diff_s", 0.15)
-    q_idx, r_idx = nearest_time_match(poses_df["timestamp"].values, gt_df["timestamp"].values, max_diff)
+    q_idx, r_idx = nearest_time_match(poses_df["timestamp"].values,
+                                      gt_df["timestamp"].values, max_diff)
     if len(q_idx) < 10:
         raise RuntimeError(
-            f"Only {len(q_idx)} timestamp matches found between SLAM poses and "
-            f"ground truth within {max_diff}s. Check that poses_local.csv and "
-            f"the ground-truth CSV cover overlapping time windows and share "
-            f"the same epoch (Unix seconds)."
-        )
+            f"Only {len(q_idx)} timestamp matches between SLAM poses and ground "
+            f"truth within {max_diff}s. Check time windows / shared epoch.")
 
     src = poses_df[["x", "y", "z"]].values[q_idx]
     dst = gt_enu[r_idx]
-    R, t = umeyama_alignment(src, dst)
+    method = cfg.get("alignment", {}).get("method", "anchored")
+    R, t = (anchored_alignment(src, dst) if method == "anchored"
+            else umeyama_alignment(src, dst))
 
     fit_pred = (R @ src.T).T + t
     fit_rmse_m = float(np.sqrt(np.mean(np.sum((fit_pred - dst) ** 2, axis=1))))
 
     all_xyz = poses_df[["x", "y", "z"]].values
-    aligned_enu = (R @ all_xyz.T).T + t
-    lat, lon, alt = enu_to_geodetic(aligned_enu, lat0, lon0, alt0)
+    aligned = (R @ all_xyz.T).T + t
+    lat, lon, alt = enu_to_geodetic(aligned, lat0, lon0, alt0)
 
-    traj_latlon_df = pd.DataFrame(
-        {
-            "timestamp": poses_df["timestamp"].values,
-            "lat": lat, "lon": lon, "alt": alt,
-            "x_enu": aligned_enu[:, 0], "y_enu": aligned_enu[:, 1], "z_enu": aligned_enu[:, 2],
-        }
-    )
-    return traj_latlon_df, (lat0, lon0, alt0), fit_rmse_m, (R, t)
+    traj = pd.DataFrame({
+        "timestamp": poses_df["timestamp"].values,
+        "lat": lat, "lon": lon, "alt": alt,
+        "x_enu": aligned[:, 0], "y_enu": aligned[:, 1], "z_enu": aligned[:, 2],
+    })
+    return traj, (lat0, lon0, alt0), fit_rmse_m, (R, t)

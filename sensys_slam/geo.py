@@ -1,7 +1,7 @@
 """Geodetic (WGS84 lat/lon/alt) <-> local ENU (East-North-Up, meters)
 conversions, used to bring the SLAM trajectory and the GNSS ground truth
-into a common metric frame for alignment, and to project the aligned SLAM
-trajectory back to lat/lon for the final deliverable.
+into a common metric frame, and to project the trajectory back to lat/lon
+for the final deliverable.
 """
 import numpy as np
 import pymap3d as pm
