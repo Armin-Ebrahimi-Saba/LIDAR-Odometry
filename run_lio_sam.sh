@@ -30,9 +30,11 @@ echo "Playing rosbag with topic remapping..."
 # Play the bag, using --clock to publish /clock if needed, though LIO-SAM uses message timestamps
 rosbag play lio_sam_ready.bag --clock /ouster/points:=/os_cloud_node/points /ouster/imu_meas:=/stim300/imu/data_raw
 
-echo "Rosbag finished playing. You can now save the map in another terminal using:"
-echo "rosservice call /lio_sam_6axis/save_map"
-echo "Press Ctrl+C to exit."
+echo "Rosbag finished playing. Automatically saving the map to /workspace/maps/..."
+# Call the ROS service to save the map with resolution 0.2
+rosservice call /lio_sam_6axis/save_map 0.2 "/../../workspace/maps/"
+
+echo "Map saved. Press Ctrl+C to exit."
 
 # Wait for the background ROS launch to finish (when user presses Ctrl+C)
 wait $LIO_PID

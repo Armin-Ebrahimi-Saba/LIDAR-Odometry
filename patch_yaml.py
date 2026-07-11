@@ -13,12 +13,10 @@ with open(path, 'r') as f:
 content = content.replace('N_SCAN: 128', 'N_SCAN: 32')
 content = content.replace('imuFrequence: 200', 'imuFrequence: 100')
 
-
-content = content.replace('imuAccNoise: 0.0011501915187049582', 'imuAccNoise: 0.01')
-content = content.replace('imuGyrNoise: 5.084312924828687e-05', 'imuGyrNoise: 0.001')
-content = content.replace('imuAccBiasN: 3.729854069064516e-05', 'imuAccBiasN: 0.0001')
-content = content.replace('imuGyrBiasN: 6.509823412408377e-07', 'imuGyrBiasN: 0.00001')
-
+content = content.replace('imuAccNoise: 0.0011501915187049582', 'imuAccNoise: 0.1')
+content = content.replace('imuGyrNoise: 5.084312924828687e-05', 'imuGyrNoise: 0.01')
+content = content.replace('imuAccBiasN: 3.729854069064516e-05', 'imuAccBiasN: 0.001')
+content = content.replace('imuGyrBiasN: 6.509823412408377e-07', 'imuGyrBiasN: 0.0001')
 
 trans_old = 'extrinsicTrans: [ -0.047781, 0.007303, -0.026583 ]'
 trans_new = 'extrinsicTrans: [ 0.0, 0.0, 0.0 ]'
