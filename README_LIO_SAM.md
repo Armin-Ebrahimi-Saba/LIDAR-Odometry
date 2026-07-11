@@ -65,3 +65,8 @@ Das Skript ruft dann den ROS Service `/lio_sam_6axis/save_map` auf.
 *   **RViz öffnet sich nicht:** Stelle sicher, dass VcXsrv (Xming) auf Windows läuft und `Disable access control` in den Einstellungen aktiviert ist.
 *   **"Large velocity" Warnungen:** Wenn diese Fehler in den Logs auftauchen und die Map explodiert, stimmt die IMU-Konfiguration nicht. Prüfe, ob `patch_yaml.py` korrekt aufgerufen wurde.
 *   **Map bleibt leer in RViz:** Klicke in RViz links auf "Add" -> "PointCloud2" und setze das Topic auf `/lio_sam_6axis/mapping/map_global` oder `/lio_sam_6axis/deskew/cloud_deskewed`.
+
+## Control bag play
+* Pause: docker exec lio_sam_6axis /bin/bash -c "source /opt/ros/melodic/setup.bash && rosservice call /bag_player/pause_playback true"
+
+* Weiter: docker exec lio_sam_6axis /bin/bash -c "source /opt/ros/melodic/setup.bash && rosservice call /bag_player/pause_playback false"

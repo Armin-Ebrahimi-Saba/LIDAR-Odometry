@@ -28,13 +28,17 @@ RVIZ_PID=$!
 
 echo "Playing rosbag with topic remapping..."
 # Play the bag, using --clock to publish /clock if needed, though LIO-SAM uses message timestamps
-rosbag play lio_sam_ready.bag --clock /ouster/points:=/os_cloud_node/points /ouster/imu_meas:=/stim300/imu/data_raw
+rosbag play -r 0.5 lio_sam_ready.bag --clock /ouster/points:=/os_cloud_node/points /ouster/imu_meas:=/stim300/imu/data_raw __name:=bag_player
 
 echo "Rosbag finished playing. Automatically saving the map to /workspace/maps/..."
 # Call the ROS service to save the map with NO arguments, it will use savePCDDirectory
 rosservice call /lio_sam_6axis/save_map
 
-echo "Map saved. Press Ctrl+C to exit."
+# Copy the saved maps from the LIO-SAM internal data directory to the host-mounted workspace directory
+mkdir -p /workspace/maps/
+cp -r /root/workspace/src/LIO_SAM_6AXIS/LIO-SAM-6AXIS/data/* /workspace/maps/ || true
+
+echo "Map saved to your maps/ folder. Press Ctrl+C to exit."
 
 # Wait for the background ROS launch to finish (when user presses Ctrl+C)
 wait $LIO_PID

@@ -3,3 +3,7 @@
 rosbag/
 rosbag_new/
 *.bag
+
+# Maps
+maps/
+*.pcd
