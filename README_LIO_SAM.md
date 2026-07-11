@@ -56,7 +56,7 @@ Das Skript ruft dann den ROS Service `/lio_sam_6axis/save_map` auf.
 **Die gespeicherten `.pcd` Punktwolken-Dateien findest du direkt auf deinem Windows-Desktop im neuen Ordner `maps/`.**
 
 > **Manuelles Speichern:** Falls du den Vorgang vorzeitig abbrechen und den bisherigen Stand speichern möchtest, öffne ein zweites Terminal in diesem Ordner, hänge dich in den laufenden Container und rufe den Service manuell auf:
-> `docker exec lio_sam_6axis /bin/bash -c "source /opt/ros/melodic/setup.bash && rosservice call /lio_sam_6axis/save_map 0.2 '/../../workspace/maps/'"`
+> `docker exec lio_sam_6axis /bin/bash -c "source /opt/ros/melodic/setup.bash && rosservice call /lio_sam_6axis/save_map"`
 
 ---
 

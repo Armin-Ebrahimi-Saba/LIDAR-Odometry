@@ -31,8 +31,8 @@ echo "Playing rosbag with topic remapping..."
 rosbag play lio_sam_ready.bag --clock /ouster/points:=/os_cloud_node/points /ouster/imu_meas:=/stim300/imu/data_raw
 
 echo "Rosbag finished playing. Automatically saving the map to /workspace/maps/..."
-# Call the ROS service to save the map with resolution 0.2
-rosservice call /lio_sam_6axis/save_map 0.2 "/../../workspace/maps/"
+# Call the ROS service to save the map with NO arguments, it will use savePCDDirectory
+rosservice call /lio_sam_6axis/save_map
 
 echo "Map saved. Press Ctrl+C to exit."
 

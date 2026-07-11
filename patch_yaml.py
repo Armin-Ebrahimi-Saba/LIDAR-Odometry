@@ -38,6 +38,7 @@ rpy_new = '''extrinsicRPY: [ 1.0, 0.0, 0.0,
                   0.0, 0.0, 1.0 ]'''
 content = content.replace(rpy_old, rpy_new)
 
+content = content.replace('savePCDDirectory: "/home/xchu/ramlab_ws/src/LIO-SAM-6AXIS/data/"', 'savePCDDirectory: "/../../workspace/maps/"')
 content = content.replace('imuGravity: 9.80511', 'imuGravity: -9.80511')
 
 with open(path, 'w') as f:
