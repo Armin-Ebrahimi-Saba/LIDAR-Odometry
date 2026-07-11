@@ -1,0 +1,16 @@
+services:
+  lio_sam:
+    build: .
+    image: lio_sam_6axis_built
+    container_name: lio_sam_6axis
+    network_mode: "host"
+    environment:
+      - DISPLAY=host.docker.internal:0.0
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_INDIRECT=0
+      - LIBGL_ALWAYS_SOFTWARE=1
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - .:/workspace
+    working_dir: /workspace
+    command: /bin/zsh -c "./run_lio_sam.sh"

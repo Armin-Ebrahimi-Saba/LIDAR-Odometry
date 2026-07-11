@@ -1,42 +1,5 @@
-# ---- Data & generated outputs ----
-# Large LiDAR/GNSS datasets and rosbags (52G+); keep out of version control
-data/
-outputs/
+# Rosbags
 *.db3
-*.laz
-*.las
-*.pcd
-*.zip
-
-# ---- Python ----
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.eggs/
-build/
-dist/
-*.egg
-
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
-
-# ROS runtime logs (roscore writes to $HOME/.ros when run in the container)
-.ros/
-
-# ---- Tooling / caches ----
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.ipynb_checkpoints/
-.claude/
-
-# ---- Editors / OS ----
-.vscode/
-.idea/
-*.swp
-.DS_Store
-Thumbs.db
+rosbag/
+rosbag_new/
+*.bag
