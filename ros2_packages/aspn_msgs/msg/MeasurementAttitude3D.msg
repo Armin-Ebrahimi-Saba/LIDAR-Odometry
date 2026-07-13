@@ -1,0 +1,11 @@
+std_msgs/Header header
+aspn_msgs/TypeHeader aspn_header
+aspn_msgs/TypeTimestamp time_of_validity
+uint8 reference_frame
+float64[4] quaternion
+float64[9] tilt_error_covariance
+uint8 error_model
+uint16 num_error_model_params
+float64[] error_model_params
+uint8 num_integrity
+aspn_msgs/TypeIntegrity[] integrity

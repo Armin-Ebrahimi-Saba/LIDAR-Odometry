@@ -189,7 +189,82 @@ Run it:
 ros2 run glim_ros glim_rosbag $(realpath data/os1_128_01_downsampled) --ros-args -p config_path:=$(realpath config)
 ```
 
-**Verified working** (July 2026): full SLAM pipeline (odometry → local mapping →
+## Custom ROS2 message packages
+
+This project depends on two non-standard ROS2 message packages that aren't part of
+a normal ROS2 install. Both live in `ros2_packages/` in this repo and get
+symlinked into the colcon workspace (`~/ros2_ws/src/`) at build time.
+
+### `px4_msgs`
+
+Official PX4 message definitions (release/1.17), required to read the
+`/fmu/out/*` topics in the course rosbags. Not vendored in this repo — clone
+directly:
+
+```bash
+cd ~/ros2_ws/src
+git clone -b release/1.17 https://github.com/PX4/px4_msgs.git
+cd ~/ros2_ws
+colcon build --packages-select px4_msgs
+```
+
+### `aspn_msgs` (reconstructed, vendored in this repo under `ros2_packages/aspn_msgs`)
+
+The course rosbags publish IMU data (`/ouster/imu_meas`) and attitude
+(`/ouster/imu_att`) using a **custom, non-standard message type**
+(`aspn_msgs/msg/MeasurementIMU`, `aspn_msgs/msg/MeasurementAttitude3D`) instead
+of the standard `sensor_msgs/msg/Imu`. GLIM cannot subscribe to these directly.
+
+**There is no public `aspn_msgs` ROS2 package to install.** `aspn_msgs` is not a
+piece of software — it's the course team's own implementation of the
+[ASPN 2023 ICD](https://github.com/Open-PNT/ASPN-ICD) (a data schema
+*specification*, published as YAML, not code) with a `std_msgs/Header` added on
+top (confirmed by course staff via email, July 2026). We reconstructed the
+`.msg` files ourselves directly from that spec, matching:
+
+- `measurements/measurement_IMU.yaml` → `MeasurementIMU.msg`
+- `measurements/measurement_attitude_3d.yaml` → `MeasurementAttitude3D.msg`
+- `types/type_header.yaml` → `TypeHeader.msg`
+- `types/type_timestamp.yaml` → `TypeTimestamp.msg`
+- `types/type_integrity.yaml` → `TypeIntegrity.msg`
+
+Design choices made where the YAML spec is ambiguous about ROS2-specific
+serialization details:
+- ASPN enums (`imu_type`, `reference_frame`, `error_model`, `integrity_method`) →
+  `uint8`
+- Variable-length arrays (`type_integrity[num_integrity]`) → ROS2 unbounded
+  array syntax (`TypeIntegrity[]`)
+- Optional fields (`float64?`) → plain `float64` (ROS2 has no true optional
+  primitive; reads as `0.0` when unused — doesn't affect `meas_accel`/`meas_gyro`)
+- 3×3 matrix (`tilt_error_covariance`) → flattened `float64[9]`, row-major
+- The added `std_msgs/Header` is assumed to come first, with the original ASPN
+  header field renamed `aspn_header` to avoid a name collision
+
+**Verified correct** against real bag data (`scripts/verify_aspn_imu.py`): decoded
+accelerometer magnitude consistently reads ~9.6-9.7 m/s² (≈ gravity) and gyro
+values are small and smooth, confirming the field layout matches what the
+recording pipeline actually used.
+
+Build it:
+```bash
+cd ~/ros2_ws
+colcon build --packages-select aspn_msgs
+source install/setup.bash
+```
+
+Re-verify against a bag at any time:
+```bash
+python3 scripts/verify_aspn_imu.py data/Test1_data/rosbag
+```
+
+### LIDAR–IMU extrinsics
+
+the Pixhawk (IMU) frame can be assumed equivalent to the LiDAR (Ouster OS0) frame — i.e. `T_lidar_imu` ≈ identity.
+There's a small physical mounting offset visible in the slide 11-12 photos, but
+it's considered negligible.
+
+
+**Verified working** (2026-07-11): full SLAM pipeline (odometry → local mapping →
 global mapping) ran end-to-end on CPU only, viewer displayed live map + trajectory,
 output written to `/tmp/dump`.
 

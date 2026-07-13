@@ -1,0 +1,2 @@
+uint8 integrity_method
+float64 integrity_value
