@@ -259,10 +259,22 @@ python3 scripts/verify_aspn_imu.py data/Test1_data/rosbag
 
 ### LIDAR–IMU extrinsics
 
-the Pixhawk (IMU) frame can be assumed equivalent to the LiDAR (Ouster OS0) frame — i.e. `T_lidar_imu` ≈ identity.
-There's a small physical mounting offset visible in the slide 11-12 photos, but
-it's considered negligible.
+We use `/ouster/imu_meas` (raw IMU) as GLIM's IMU source, not a Pixhawk topic.
+Per course staff (email, July 2026): this raw IMU is physically internal to the
+Ouster LiDAR unit, and its axes already correspond to the LiDAR's own frame.
+**`T_lidar_imu` = identity** — no extrinsic calibration needed.
 
+### Ground truth
+
+Use `data/xtrack_gnss_corrected/xtrack_global_position_t12.csv` as ground truth
+for RMSE evaluation (confirmed by course staff, July 2026) — not the raw
+`/fmu/out/vehicle_gps_position` bag topic.
+
+### Reference: PX4 message definitions
+
+Not used as core SLAM input in this pipeline, but documented here for
+reference (e.g. cross-checking against PX4's own odometry estimate later):
+https://docs.px4.io/v1.16/en/msg_docs/
 
 **Verified working** (2026-07-11): full SLAM pipeline (odometry → local mapping →
 global mapping) ran end-to-end on CPU only, viewer displayed live map + trajectory,
