@@ -41,8 +41,9 @@ _QUAT_BYTE_OFFSET = 20          # float32[4] q within the CDR payload
 _WXYZ_TO_XYZW = [1, 2, 3, 0]    # PX4 stores [w,x,y,z]; scipy wants [x,y,z,w]
 
 
-def load_attitude_deskewer(bag_dir: str, topic: str = PX4_ATTITUDE_TOPIC):
-    """Read the attitude stream and return an `AttitudeDeskewer`."""
+def _read_attitude(bag_dir: str, topic: str = PX4_ATTITUDE_TOPIC):
+    """Read the raw PX4 attitude stream -> (times[s], Rotation) with strictly
+    increasing timestamps. Quaternions are body(FRD)->NED (see module docstring)."""
     import struct
 
     times, quats = [], []
@@ -68,9 +69,23 @@ def load_attitude_deskewer(bag_dir: str, topic: str = PX4_ATTITUDE_TOPIC):
     order = np.argsort(times)
     times = times[order]
     quats = np.asarray(quats)[order][:, _WXYZ_TO_XYZW]
-    # Slerp needs strictly increasing timestamps.
-    keep = np.concatenate([[True], np.diff(times) > 0])
-    return AttitudeDeskewer(times[keep], Rotation.from_quat(quats[keep]))
+    keep = np.concatenate([[True], np.diff(times) > 0])   # Slerp needs strictly increasing t
+    return times[keep], Rotation.from_quat(quats[keep])
+
+
+def load_attitude_deskewer(bag_dir: str, topic: str = PX4_ATTITUDE_TOPIC):
+    """Read the attitude stream and return an `AttitudeDeskewer`."""
+    times, rots = _read_attitude(bag_dir, topic)
+    return AttitudeDeskewer(times, rots)
+
+
+def attitude_rotation_at(bag_dir: str, t_query: float, topic: str = PX4_ATTITUDE_TOPIC):
+    """SLERP-interpolated body(FRD)->NED rotation at bag time `t_query` (clamped
+    to the attitude stream's span). Used to seed the georeference orientation
+    from measured attitude instead of fitting it to GNSS."""
+    times, rots = _read_attitude(bag_dir, topic)
+    tq = float(np.clip(t_query, times[0], times[-1]))
+    return Slerp(times, rots)([tq])[0]
 
 
 class AttitudeDeskewer:

@@ -3,15 +3,21 @@
 
 Stages (run with --stage, or 'all' to run everything in order):
   1. timestamps -- pair .laz scans with bag-recorded timestamps
-  2. odometry   -- from-scratch KISS-ICP odometry/SLAM -> local poses + 3D map,
+  2. odometry   -- KISS-ICP odometry/SLAM -> local poses + 3D map,
                     seeded at the first GNSS ground-truth point
-  3. align      -- start-anchored SE(3) georeference to GNSS -> lat/lon
+  3. align      -- Umeyama SE(3) georeference to GNSS -> lat/lon
   4. velocity   -- finite-difference the trajectory -> NED velocity
   5. evaluate   -- RMSE + error-over-time plot vs. ground truth
+  6. map        -- render odometry + GNSS on OpenStreetMap (HTML)
+  7. map3d      -- render the SLAM 3D point-cloud map (interactive HTML)
+
+`--stage X` runs stage X and every stage after it (they chain off each other),
+so `--stage align` re-does align -> velocity -> evaluate -> map -> map3d.
+`--stage all` (default) runs the whole pipeline.
 
 Usage:
     python run_pipeline.py --config config.yaml
-    python run_pipeline.py --config config.yaml --stage odometry
+    python run_pipeline.py --config config.yaml --stage align   # align onward
 """
 import argparse
 from pathlib import Path
@@ -28,7 +34,7 @@ from sensys_slam.align import align_and_georeference
 from sensys_slam.velocity import compute_ned_velocity
 from sensys_slam.evaluate import evaluate_against_ground_truth
 
-ALL_STAGES = ["timestamps", "odometry", "align", "velocity", "evaluate"]
+ALL_STAGES = ["timestamps", "odometry", "align", "velocity", "evaluate", "map", "map3d"]
 
 
 def load_config(path: str) -> dict:
@@ -45,7 +51,9 @@ def gt_first_point(cfg: dict):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--stage", default="all", choices=["all"] + ALL_STAGES)
+    parser.add_argument("--stage", default="all", choices=["all"] + ALL_STAGES,
+                        help="run this stage AND all stages after it (e.g. --stage "
+                             "align runs align, velocity, evaluate). 'all' runs everything.")
     parser.add_argument("--frames", nargs=2, type=int, metavar=("START", "END"), default=None,
                         help="closed range of scan indices to process, e.g. --frames 1000 2000 "
                              "(overrides run.frame_start/frame_end in the config)")
@@ -69,7 +77,10 @@ def main():
     if frame_end is not None and frame_end < frame_start:
         raise SystemExit(f"frame range END ({frame_end}) < START ({frame_start}).")
 
-    stages = ALL_STAGES if args.stage == "all" else [args.stage]
+    # Run the requested stage and every stage after it (a stage depends on the
+    # outputs of the ones before, so "from here on" is the useful default).
+    stages = (ALL_STAGES if args.stage == "all"
+              else ALL_STAGES[ALL_STAGES.index(args.stage):])
 
     if "timestamps" in stages:
         print("\n== Stage 1: building LiDAR scan timestamp manifest ==")
@@ -159,6 +170,20 @@ def main():
         o = yaml.safe_load(origin_path.read_text())
         ref_origin = (o["lat0"], o["lon0"], o["alt0"])
         evaluate_against_ground_truth(traj_df, gt_df, ref_origin, cfg, str(out_dir))
+
+    if "map" in stages or "map3d" in stages:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+
+    if "map" in stages:
+        print("\n== Stage 6: rendering odometry + GNSS on OpenStreetMap ==")
+        from plot_map import make_map
+        make_map(args.config)
+
+    if "map3d" in stages:
+        print("\n== Stage 7: rendering SLAM 3D point-cloud map ==")
+        from plot_map3d import make_map3d
+        make_map3d(args.config)
 
     print("\nDone. Outputs in:", out_dir.resolve())
 

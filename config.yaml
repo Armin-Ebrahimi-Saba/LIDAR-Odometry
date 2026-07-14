@@ -1,10 +1,3 @@
-# Sensys LiDAR positioning pipeline -- configuration
-#
-# Paths below match the project layout with data/ at the repo root (see
-# README.md Section 5). Run everything from the repo root so these relative
-# paths resolve correctly. Everything else has sensible defaults pulled
-# from the inventory report.
-
 paths:
   # Folder containing metadata.yaml + rosbag_0.db3 (and rosbag_data/ alongside
   # it). Per your tree, that's the rosbag/ folder directly -- NOT the
@@ -25,18 +18,22 @@ paths:
 run:
   name: "Test1"
   lidar_topic: "/ouster/points"
-  # Run time window in Unix epoch seconds, from the inventory report (5.2).
-  # Test1: 1780397390.972 -> 1780398213.329
-  # Test2: 1780398327.532 -> 1780398929.389
-  start_time: 1780397390.972
-  end_time: 1780398213.329
+  # Run time window in Unix epoch seconds. Test1 is defined here as the FIRST
+  # 820 s of the GNSS file (first sample 1780397225.801 + 820 s). The LiDAR
+  # stream (/ouster/points) only starts at 1780397393.674, ~168 s into this
+  # window, so the extra leading GNSS rows simply have no LiDAR match.
+  #   Inventory-report windows (for reference):
+  #     Test1: 1780397390.972 -> 1780398213.329
+  #     Test2: 1780398327.532 -> 1780398929.389
+  start_time: 1780397225.801
+  end_time: 1780398045.801
   # Closed range of scan indices to process (frame_end inclusive; null = until
   # the last scan). Test1 has 8,194 scans. Overridden by `--frames START END`.
   frame_start: 0
   frame_end: null
   # Legacy: first-N-scans cap, used only when frame_end is null
   # (frame_end = frame_start + max_frames - 1). Prefer frame_start/frame_end.
-  max_frames: 1000 # max:  8,194-frame
+  max_frames: 8194 # max:  8,194-frame
 
 lidar:
   # Where odometry reads scans from:
@@ -54,7 +51,7 @@ lidar:
   # mounted axis-aligned with the Pixhawk, so only the axis convention differs
   # (180 deg about X). Set extrinsic_rpy_deg (intrinsic xyz, degrees) to the true
   # mounting rotation if known. See sensys_slam/frames.py.
-  body_frame: true
+  body_frame: false
   extrinsic_rpy_deg: null   # null -> use the FLU->FRD convention default
 
   # Optional: deskew each sweep with measured PX4 attitude
@@ -66,31 +63,27 @@ lidar:
   attitude_topic: "/fmu/out/vehicle_attitude"
 
 kiss_icp:
-  # Mirrors KISS-ICP's own config layout (config/basic.yaml + config/advanced.yaml).
-  # Every field here is forwarded verbatim to kiss_icp.config.KISSConfig by
-  # sensys_slam.odometry.build_kiss_config; omit any key to fall back to the
-  # KISS-ICP default shown in the comment.
   data:
     max_range: 20.0       # meters; tune down if you see far-away outliers in the map
-    min_range: 1.0        # meters; filters out points too close to the sensor body
+    min_range: 5        # meters; filters out points too close to the sensor body
     deskew: true          # KISS-ICP constant-velocity deskew. Needs per-point time
                            # -> requires lidar.source: bag above (the .laz files have
                            # an all-zero gps_time and cannot deskew).
 
   mapping:
     voxel_size: 1            # null = auto (max_range / 100), per KISS-ICP's own heuristic
-    max_points_per_voxel: 40    # local-map density cap per voxel
+    max_points_per_voxel: 50    # local-map density cap per voxel
 
   registration:
-    max_num_iterations: 300       # ICP iterations per scan before giving up
+    max_num_iterations: 400       # ICP iterations per scan before giving up
     convergence_criterion: 0.0001 # stop ICP once the pose update drops below this
     max_num_threads: 0            # 0 = automatic (use all available cores)
 
   adaptive_threshold:
     fixed_threshold: null   # set a float to DISABLE the adaptive threshold and use this
                              # constant correspondence threshold instead (advanced.yaml)
-    initial_threshold: 0.001  # starting data-association threshold (used when adaptive)
-    min_motion_th: 0.001      # minimum motion (m) before the threshold adapts
+    initial_threshold: 3.0  # starting data-association threshold (used when adaptive)
+    min_motion_th: 0.1      # minimum motion (m) before the threshold adapts
 
 ground_truth:
   require_lat_lon_valid: true   # drop rows where lat_lon_valid == False, if column exists
@@ -99,7 +92,18 @@ ground_truth:
                                   # edge jumps in the error plot after the basic crop
 
 alignment:
+  # The odometry is georeferenced onto the GNSS ENU frame with a global
+  # least-squares (Umeyama) rigid fit: rotation + translation, scale fixed to 1.
   max_time_diff_s: 0.15   # max gap allowed when matching a SLAM pose to its nearest GT sample
+  # Weight matched pairs by the GNSS solution's own uncertainty when fitting the
+  # georeference and computing RMSE: weight = 1 / max(eph, eph_floor_m)^2, using
+  # PX4's per-sample horizontal error `eph` (m, 1-sigma) from the ground-truth
+  # CSV. Down-weights the several-metre position wander during GNSS
+  # initialisation (where eph is worst) instead of letting it inflate the error.
+  # Set false to weight every matched sample equally (raw RMSE only).
+  eph_weighting: true
+  eph_floor_m: 0.3        # clamp eph below this (m) so one over-confident sample
+                           # can't dominate; ~ the best eph seen in this dataset
 
 velocity:
   smooth_window: 1       # odd window length (samples) for position smoothing before
@@ -108,4 +112,4 @@ velocity:
 
 evaluation:
   plot_title: "Test1 -- LiDAR Odometry vs GNSS Ground Truth"
-  time_tick_s: 10   # put a time marker on the trajectory plot every N seconds (0 = off)
+  time_tick_s: 100   # put a time marker on the trajectory plot every N seconds (0 = off)

@@ -10,7 +10,8 @@ Usage:
     python scripts/plot_ground_truth.py                 # current run (config.yaml)
     python scripts/plot_ground_truth.py --full          # whole file, both runs
     python scripts/plot_ground_truth.py --output path.png
-    python scripts/plot_ground_truth.py --times "100 300 500"
+    python scripts/plot_ground_truth.py --times "100 300 500"   # seconds since start
+    python scripts/plot_ground_truth.py --frames "1000 1500"    # LiDAR frame indices
 """
 import argparse
 from pathlib import Path
@@ -41,7 +42,26 @@ def _parse_floats(spec):
     return [float(tok) for tok in re.split(r"[;,\s]+", (spec or "").strip()) if tok]
 
 
-def plot_ground_truth(config_path, full=False, output=None, times=None):
+def _lidar_frame_times(bag_dir, topic):
+    """Absolute bag-record times (s) of every message on `topic`, in order.
+
+    Used to translate LiDAR frame indices (e.g. 1000, 1500) into wall-clock
+    times so they can be marked on the GNSS trajectory.
+    """
+    from rosbags.highlevel import AnyReader
+    from rosbags.typesys import Stores, get_typestore
+    ts = get_typestore(Stores.LATEST)
+    times = []
+    with AnyReader([Path(bag_dir)], default_typestore=ts) as reader:
+        conns = [c for c in reader.connections if c.topic == topic]
+        if not conns:
+            raise SystemExit(f"Topic '{topic}' not found in {bag_dir}.")
+        for _c, t_ns, _raw in reader.messages(connections=conns):
+            times.append(t_ns * 1e-9)
+    return np.asarray(times)
+
+
+def plot_ground_truth(config_path, full=False, output=None, times=None, frames=None):
     cfg = yaml.safe_load(Path(config_path).read_text())
     df = pd.read_csv(cfg["paths"]["gnss_csv"])
     tcol = _time_col(df)
@@ -75,19 +95,42 @@ def plot_ground_truth(config_path, full=False, output=None, times=None):
     ax[0].scatter([E[0]], [N[0]], c="k", s=70, marker="o", label="start", zorder=5)
     ax[0].scatter([E[-1]], [N[-1]], c="r", s=70, marker="X", label="end", zorder=5)
 
-    # User-supplied times: mark the GNSS position at each time. Values are
-    # seconds since the run start, or absolute Unix epoch (auto-detected).
-    time_marks = []
-    for k, tv in enumerate(times or []):
+    # Build the list of (absolute_time, label) marks to draw on the trajectory:
+    #   --times  : seconds since run start, or absolute Unix epoch (auto-detected)
+    #   --frames : LiDAR frame indices, translated to bag time via /ouster/points
+    marks = []
+    for tv in (times or []):
         t_abs = tv if tv > 1e6 else t[0] + tv
+        marks.append((t_abs, f"{tv:.0f}s" if tv <= 1e6 else f"{t_abs - t[0]:.0f}s"))
+    if frames:
+        ft = _lidar_frame_times(cfg["paths"]["bag_dir"],
+                                cfg["run"].get("lidar_topic", "/ouster/points"))
+        for fi in frames:
+            fi = int(fi)
+            if fi < 0 or fi >= len(ft):
+                print(f"[plot_ground_truth] WARNING: frame {fi} out of range "
+                      f"(0..{len(ft) - 1}); skipped.")
+                continue
+            marks.append((ft[fi], f"f{fi}"))
+
+    # The GNSS df is already cropped to the run window, so t[0]..t[-1] is the
+    # valid marking span. Warn (don't silently snap to the end) if a mark lies
+    # outside it -- that was the "no marks appear" footgun for frame-sized values.
+    time_marks = []
+    for k, (t_abs, label) in enumerate(marks):
+        if t_abs < t[0] - 1e-6 or t_abs > t[-1] + 1e-6:
+            print(f"[plot_ground_truth] WARNING: mark '{label}' at {t_abs - t[0]:+.1f}s "
+                  f"is outside the run window (0..{t[-1] - t[0]:.0f}s); not drawn.")
+            continue
         j = int(np.argmin(np.abs(t - t_abs)))
         time_marks.append((t[j] - t[0], enu[j, 0], enu[j, 1]))
         ax[0].scatter([enu[j, 0]], [enu[j, 1]], c="cyan", marker="D", s=90,
                       edgecolor="k", linewidth=0.6, zorder=6,
-                      label="input times" if k == 0 else None)
-        ax[0].annotate(f"{t[j]-t[0]:.0f}s", (enu[j, 0], enu[j, 1]),
+                      label="marks" if k == 0 else None)
+        ax[0].annotate(label, (enu[j, 0], enu[j, 1]),
                        textcoords="offset points", xytext=(6, -12), fontsize=9, color="teal")
-        print(f"[plot_ground_truth] time {t[j]-t[0]:.1f}s -> ENU=({enu[j,0]:.1f}, {enu[j,1]:.1f}) m")
+        print(f"[plot_ground_truth] {label} @ {t[j]-t[0]:.1f}s -> "
+              f"ENU=({enu[j,0]:.1f}, {enu[j,1]:.1f}) m")
 
     ax[0].set_xlabel("East [m]"); ax[0].set_ylabel("North [m]")
     ax[0].set_title(f"{title_prefix} (ENU)"); ax[0].axis("equal"); ax[0].legend()
@@ -101,7 +144,7 @@ def plot_ground_truth(config_path, full=False, output=None, times=None):
         ax[1].axvspan(TEST2[0] - t[0], TEST2[1] - t[0], color="tab:orange", alpha=0.15, label="Test2")
     for k, (trel_mark, _e, _n) in enumerate(time_marks):
         ax[1].axvline(trel_mark, color="cyan", ls=":", lw=1.2,
-                      label="input times" if k == 0 else None)
+                      label="marks" if k == 0 else None)
     ax[1].set_xlabel("time since start [s]"); ax[1].set_ylabel("position [m]")
     ax[1].set_title("ENU components over time"); ax[1].legend()
 
@@ -126,10 +169,14 @@ def main():
     ap.add_argument("--times", default=None, metavar='"t1 t2"',
                     help="mark GNSS position at these times: seconds since run start, "
                          "or absolute Unix epoch (auto-detected)")
+    ap.add_argument("--frames", default=None, metavar='"f1 f2"',
+                    help="mark GNSS position at these LiDAR frame indices "
+                         "(e.g. \"1000 1500\"); translated to time via /ouster/points")
     ap.add_argument("--output", default=None)
     args = ap.parse_args()
     plot_ground_truth(args.config, args.full, args.output,
-                      times=_parse_floats(args.times))
+                      times=_parse_floats(args.times),
+                      frames=_parse_floats(args.frames))
 
 
 if __name__ == "__main__":
