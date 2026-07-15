@@ -18,6 +18,7 @@ No NVIDIA GPU required — tested on WSL2, Ubuntu 24.04, ROS2 Jazzy.
   rebuild it locally following the steps below.
 
 ## Repository file structure
+```
 LIDAR-based-Positioning/
 ├── config/                          # GLIM config (CPU mode, tuned for our sensors)
 ├── data/                            # gitignored -- download/regenerate locally
@@ -33,6 +34,7 @@ LIDAR-based-Positioning/
 │   ├── bag_converter.py             # aspn_msgs -> sensor_msgs/Imu + timeoffset fix
 │   └── verify_aspn_imu.py           # sanity-check script for IMU decoding
 └── README.md
+```
 
 `rosbag_glim/` is what we actually point `glim_rosbag` at. Regenerate it any time with `bag_converter.py` (see below) if
 the conversion logic changes.
