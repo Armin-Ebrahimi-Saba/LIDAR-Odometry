@@ -76,18 +76,6 @@ echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
 source ~/.bashrc
 ```
 
-> **Certificate/TLS error on `packages.ros.org`?** This is commonly antivirus
-> HTTPS-inspection (Kaspersky, ESET, corporate endpoint protection, etc.)
-> intercepting the connection. Using `http://` instead of `https://` for this one
-> repo works around it — apt's actual security comes from the GPG-signed
-> keyring, not the transport encryption. Confirm first with:
-> ```bash
-> date  # check clock isn't badly skewed (WSL2 can drift after sleep/resume)
-> openssl s_client -connect packages.ros.org:443 -servername packages.ros.org </dev/null 2>/dev/null | openssl x509 -noout -issuer -subject
-> ```
-> If the `issuer` shows an antivirus vendor instead of a normal CA, that
-> confirms it.
-
 ## 2. Build GTSAM 4.3a0 from source
 
 ```bash
@@ -113,10 +101,6 @@ sudo make install
 sudo ldconfig
 ```
 
-This is the slowest step (15-40+ min depending on CPU). If the build gets killed
-partway through with no clear error, it's likely WSL2 running out of RAM under
-full parallelism — retry with `make -j2`.
-
 ## 3. Build gtsam_points from source (CPU-only)
 
 ```bash
@@ -133,10 +117,6 @@ make -j$(nproc)
 sudo make install
 sudo ldconfig
 ```
-
-Check the `cmake` output includes a line like
-`GTSAM include directory: /usr/local/lib/cmake/GTSAM/../../../include` — confirms
-it's linking against the GTSAM you just built in step 2, not a stale copy.
 
 ## 4. Build Iridescence (map viewer)
 
@@ -194,7 +174,7 @@ Output (trajectory files, submaps, factor graph) is saved to `/tmp/dump`.
 ## Test dataset (demo / sanity check)
 
 Official GLIM demo bag, used to verify this whole pipeline works before pointing
-it at our own course data:
+it at the project data (Test1_data):
 
 ```bash
 mkdir -p data && cd data
@@ -203,10 +183,9 @@ tar -xzf os1_128_01_downsampled.tar.gz
 ```
 
 (~406 MB, ROS2 `.db3` format.) Note: the link on GLIM's own docs page
-(`staff.aist.go.jp`) was found to serve a truncated/corrupt file as of July 2026 —
-use the Zenodo link above instead.
+(`staff.aist.go.jp`) was found to serve a truncated/corrupt file as of July 2026. Use the Zenodo link above instead.
 
-Run it:
+Run with:
 ```bash
 ros2 run glim_ros glim_rosbag $(realpath data/os1_128_01_downsampled) --ros-args -p config_path:=$(realpath config)
 ```
@@ -222,7 +201,7 @@ Converts the raw course bag into something GLIM can consume correctly. Currently
 performs three transformations on `/ouster/points` and `/ouster/imu_meas`:
 
 1. **`aspn_msgs/MeasurementIMU` → `sensor_msgs/msg/Imu`** (topic renamed to
-   `/imu/data`) -- see "Custom ROS2 message packages" above for why this is needed.
+   `/imu/data`)
 
 2. **Accelerometer sign flip.** At rest, the raw IMU reported `linear_acceleration
    ≈ [0.15, -0.12, -9.6]` -- negative on the gravity axis. GTSAM's IMU
@@ -267,17 +246,15 @@ colcon build --packages-select px4_msgs
 
 ### `aspn_msgs` (reconstructed, vendored in this repo under `ros2_packages/aspn_msgs`)
 
-The course rosbags publish IMU data (`/ouster/imu_meas`) and attitude
+The given project rosbags publish IMU data (`/ouster/imu_meas`) and attitude
 (`/ouster/imu_att`) using a **custom, non-standard message type**
 (`aspn_msgs/msg/MeasurementIMU`, `aspn_msgs/msg/MeasurementAttitude3D`) instead
 of the standard `sensor_msgs/msg/Imu`. GLIM cannot subscribe to these directly.
 
 **There is no public `aspn_msgs` ROS2 package to install.** `aspn_msgs` is not a
-piece of software — it's the course team's own implementation of the
-[ASPN 2023 ICD](https://github.com/Open-PNT/ASPN-ICD) (a data schema
-*specification*, published as YAML, not code) with a `std_msgs/Header` added on
-top (confirmed by course staff via email, July 2026). We reconstructed the
-`.msg` files ourselves directly from that spec, matching:
+piece of software — it's an own implementation of the [ASPN 2023 ICD](https://github.com/Open-PNT/ASPN-ICD) 
+(a data schema *specification*, published as YAML, not code) with a `std_msgs/Header` added on
+top. We reconstructed the `.msg` files ourselves directly from that spec, matching:
 
 - `measurements/measurement_IMU.yaml` → `MeasurementIMU.msg`
 - `measurements/measurement_attitude_3d.yaml` → `MeasurementAttitude3D.msg`
@@ -317,15 +294,13 @@ python3 scripts/verify_aspn_imu.py data/Test1_data/rosbag
 ### LIDAR–IMU extrinsics
 
 We use `/ouster/imu_meas` (raw IMU) as GLIM's IMU source, not a Pixhawk topic.
-Per course staff (email, July 2026): this raw IMU is physically internal to the
-Ouster LiDAR unit, and its axes already correspond to the LiDAR's own frame.
+This raw IMU is physically internal to the Ouster LiDAR unit, and its axes already correspond to the LiDAR's own frame.
 **`T_lidar_imu` = identity** — no extrinsic calibration needed.
 
 ### Ground truth
 
 Use `data/xtrack_gnss_corrected/xtrack_global_position_t12.csv` as ground truth
-for RMSE evaluation (confirmed by course staff, July 2026) — not the raw
-`/fmu/out/vehicle_gps_position` bag topic.
+for RMSE evaluation, not the raw `/fmu/out/vehicle_gps_position` bag topic.
 
 ### Reference: PX4 message definitions
 
