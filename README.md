@@ -167,7 +167,7 @@ ros2 run glim_ros glim_rosbag <path_to_bag> --ros-args -p config_path:=$(realpat
 
 Output (trajectory files, submaps, factor graph) is saved to `/tmp/dump`.
 
-## Test dataset (demo / sanity check)
+## (Optional) Test dataset (demo / sanity check)
 
 Official GLIM demo bag, used to verify if this whole pipeline works before pointing
 it at the project data (Test1_data):
@@ -184,6 +184,76 @@ tar -xzf os1_128_01_downsampled.tar.gz
 Run with:
 ```bash
 ros2 run glim_ros glim_rosbag $(realpath data/os1_128_01_downsampled) --ros-args -p config_path:=$(realpath config)
+```
+
+## 7. Running GLIM on the course dataset (Test1_data)
+### * Get the bag onto the WSL filesystem
+Copy `metadata.yaml` + `rosbag_0.db3` from TUBCloud into `data/Test1_data/rosbag/` (see "Repository file 
+structure" above). Avoid working directly from `/mnt/c/...`, copy into the native WSL filesystem instead 
+for performance.
+
+### * Build the required costum message packages
+```bash
+# px4_msgs (needed to read the bag's metadata/type table, even though /fmu/out/* topics as SLAM input) is not used
+cd ~/ros2_ws/src
+git clone -b release/1.17 https://github.com/PX4/px4_msgs.git
+
+# aspn_msgs (this repo's reconstructed package. See "Custom ROS2 message packages" above)
+ln -s ~/LIDAR-based-Positioning/ros2_packages/aspn_msgs ~/ros2_ws/src/aspn_msgs
+
+cd ~/ros2_ws
+colcon build --packages-select px4_msgs aspn_msgs
+source install/setup.bash
+```
+
+### * Convert the bag
+The raw Test1_data bag can't be fed to GLIM directly since its IMU topic uses the
+custom `aspn_msgs/MeasurementIMU` type (not `sensor_msgs/msg/Imu`), the
+accelerometer has an inverted sign convention relative to what GTSAM expects,
+and the LiDAR's per-point time field (`timeoffset`) has a non-standard name
+GLIM's auto-detection doesn't recognize. `scripts/bag_converter.py` fixes all
+three:
+
+```bash
+cd ~/LIDAR-based-Positioning
+python3 scripts/bag_converter.py data/Test1_data/rosbag data/Test1_data/rosbag_glim
+```
+
+Produces `data/Test1_data/rosbag_glim/` with three topics: `/ouster/points`,
+`/tf_static`, and `/imu/data` (converted). This is what GLIM actually reads. Note: never point 
+GLIM at the raw `rosbag/` folder.
+
+### * Config changes made (all in `config/`, already applied in this repo)
+**`config_ros.json`**. The topic names changed to match the converted bag:
+```json
+"imu_topic": "/imu/data",
+"points_topic": "/ouster/points",
+```
+(`image_topic` left at its default `/image`. It is unused since we don't enable
+the camera/visual-constraint extension; harmless since that topic doesn't
+exist in the converted bag.)
+
+**`config_sensors.json`** **left unchanged.** `T_lidar_imu` keeps GLIM's
+built-in default for the Ouster OS0 (`[0.006, -0.012, 0.008, 0, 0, 0, 1]`).
+This is correct for our setup because we use `/ouster/imu_meas`,
+not an external/Pixhawk IMU that would need real extrinsic calibration.
+
+### * Run the GLIM with ROS2
+```bash
+cd ~/LIDAR-based-Positioning
+ros2 run glim_ros glim_rosbag $(realpath data/Test1_data/rosbag_glim) \
+  --ros-args -p config_path:=$(realpath config) -p auto_quit:=true
+```
+
+**Always include `-p auto_quit:=true`.** Without it, `glim_rosbag` finishes
+processing the entire bag and then idles forever waiting for live ROS2
+messages that will never come. `auto_quit:=true` makes it save to `/tmp/dump` and
+exit automatically the moment the bag is fully read.
+
+Output lands in `/tmp/dump` (trajectory files, submaps, factor graph). If needed, back it up before 
+running again, since the next run overwrites it:
+```bash
+cp -r /tmp/dump /tmp/dump_test1_$(date +%Y%m%d_%H%M%S)
 ```
 
 ## Custom ROS2 message packages
@@ -304,21 +374,9 @@ https://docs.px4.io/v1.16/en/msg_docs/
 
 **Verified working** (2026-07-11): full SLAM pipeline (odometry → local mapping →
 global mapping) ran end-to-end on CPU only, viewer displayed live map + trajectory,
-output written to `/tmp/dump`.
+output written to `/tmp/dump`. 
 
 ## Known issues / investigation log
-**Resolved:**
-- GTSAM PPA ABI mismatch -> built from source (see top of README)
-- `aspn_msgs` missing -> reconstructed from ASPN-ICD spec (see above)
-- Accelerometer sign convention -> fixed in `bag_converter.py`
-- Missing per-point deskewing timestamps -> fixed in `bag_converter.py`
-  (`timeoffset` field rename/rescale)
-- `imu_bias_noise`: tested `1e-3`/`1e-4`/`1e-5`. `1e-3` looked like it helped
-  *before* the accel-sign fix (likely compensating for that deeper bug rather
-  than a real noise-model improvement). Reverted to the documented default
-  (`1e-5`) once the accel-sign fix was in place.
-
-**Open / unresolved:**
 - **"Tornado" scattering artifact**: point clouds scatter heavily around the
   platform's own position, particularly noticeable when the platform is
   stationary for an extended period. Not yet root-caused but the candidate
@@ -326,12 +384,6 @@ output written to `/tmp/dump`.
   weakness during long stationary segments. Moving object "ghosting" (trailing 
   point-cloud copies e.g. behind pedestrians) occurs, especially for a point-cloud SLAM system without
   dedicated dynamic-object filtering.
-- **Long-run performance on CPU**: global mapping cost grows over the course of
-  the ~13.7 min recording (denser submap-pair factor graph, which is consistent with
-  the GLIM paper's own reported behavior), causing the GUI to become slow/
-  unresponsive in the back half of a run on this hardware. Also not a hang, confirmed via `top` (high CPU%, not 0%) 
-  during an apparently "stuck" period. Closing the GUI mid-run triggers a partial save (whatever was
-  processed up to that point) and does not corrupt output.
 - **GNSS/camera fusion**: considered but not pursued. GLIM has no built-in GNSS
   factor (would require writing a custom extension module via its "global
   callback slot" mechanism). Visual constraints are natively supported but require real D435i 
@@ -342,8 +394,7 @@ output written to `/tmp/dump`.
 - [x] Verified against official demo dataset
 - [x] Custom `aspn_msgs` package reconstructed and verified
 - [x] Bag conversion pipeline (IMU type + accel sign + deskewing timestamps)
-- [x] Run against Test1 course dataset (partial)
-- [ ] Run Test1 to full completion
+- [x] Run Test1 to full completion
 - [ ] Export trajectory to LatLon CSV
 - [ ] Compute RMSE vs GNSS ground truth (`xtrack_global_position_t12.csv`)
 - [ ] Export point cloud map as `.pcd`
