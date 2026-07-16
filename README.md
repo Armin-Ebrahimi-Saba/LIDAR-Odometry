@@ -187,12 +187,12 @@ ros2 run glim_ros glim_rosbag $(realpath data/os1_128_01_downsampled) --ros-args
 ```
 
 ## 7. Running GLIM on the course dataset (Test1_data)
-### * Get the bag onto the WSL filesystem
+### Get the bag onto the WSL filesystem
 Copy `metadata.yaml` + `rosbag_0.db3` from TUBCloud into `data/Test1_data/rosbag/` (see "Repository file 
 structure" above). Avoid working directly from `/mnt/c/...`, copy into the native WSL filesystem instead 
 for performance.
 
-### * Build the required costum message packages
+### Build the required costum message packages
 ```bash
 # px4_msgs (needed to read the bag's metadata/type table, even though /fmu/out/* topics as SLAM input) is not used
 cd ~/ros2_ws/src
@@ -206,7 +206,7 @@ colcon build --packages-select px4_msgs aspn_msgs
 source install/setup.bash
 ```
 
-### * Convert the bag
+### Convert the bag
 The raw Test1_data bag can't be fed to GLIM directly since its IMU topic uses the
 custom `aspn_msgs/MeasurementIMU` type (not `sensor_msgs/msg/Imu`), the
 accelerometer has an inverted sign convention relative to what GTSAM expects,
@@ -223,7 +223,7 @@ Produces `data/Test1_data/rosbag_glim/` with three topics: `/ouster/points`,
 `/tf_static`, and `/imu/data` (converted). This is what GLIM actually reads. Note: never point 
 GLIM at the raw `rosbag/` folder.
 
-### * Config changes made (all in `config/`, already applied in this repo)
+### Modify configs (all in `config/`, already applied in this repo)
 **`config_ros.json`**. The topic names changed to match the converted bag:
 ```json
 "imu_topic": "/imu/data",
@@ -238,7 +238,7 @@ built-in default for the Ouster OS0 (`[0.006, -0.012, 0.008, 0, 0, 0, 1]`).
 This is correct for our setup because we use `/ouster/imu_meas`,
 not an external/Pixhawk IMU that would need real extrinsic calibration.
 
-### * Run the GLIM with ROS2
+### Run the GLIM with ROS2
 ```bash
 cd ~/LIDAR-based-Positioning
 ros2 run glim_ros glim_rosbag $(realpath data/Test1_data/rosbag_glim) \
