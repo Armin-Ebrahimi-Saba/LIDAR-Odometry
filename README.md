@@ -2,20 +2,17 @@
 
 CPU-only build of [GLIM](https://github.com/koide3/glim) (LiDAR-Inertial SLAM) for
 the Sensor Systems project (Task 3: LIDAR-based Positioning and Map Generation).
-No NVIDIA GPU required — tested on WSL2, Ubuntu 24.04, ROS2 Jazzy.
+No NVIDIA GPU required. Tested on WSL2, Ubuntu 24.04, ROS2 Jazzy.
 
 ## Workspace layout
 
 - **This repo** = the working directory. `config/` holds GLIM's config (CPU
   variants already selected for odometry/sub_mapping/global_mapping). `data/`
-  (gitignored) is where datasets/bags go locally — download fresh per machine,
-  never commit them.
-- **`~/src/`** (outside this repo) — source checkouts of GTSAM, gtsam_points, and
-  Iridescence, built and installed system-wide via `make install`. Third-party
-  dependencies, not part of this repo.
-- **`~/ros2_ws/`** (outside this repo) — a colcon workspace containing the `glim`
-  and `glim_ros2` repos, built via `colcon build`. Also not part of this repo —
-  rebuild it locally following the steps below.
+  (gitignored) is where datasets/bags go locally.
+- **`~/src/`** (outside this repo). This contains source checkouts of GTSAM, gtsam_points, and
+  Iridescence, built and installed system-wide via `make install`.
+- **`~/ros2_ws/`** (outside this repo). This is a colcon workspace containing the `glim`
+  and `glim_ros2` repos, built via `colcon build`. To rebuild it locally please refer to the following steps below.
 
 ## Repository file structure
 ```
@@ -36,22 +33,21 @@ LIDAR-based-Positioning/
 └── README.md
 ```
 
-`rosbag_glim/` is what we actually point `glim_rosbag` at. Regenerate it any time with `bag_converter.py` (see below) if
-the conversion logic changes.
+`rosbag_glim/` is the directory that `glim_rosbag` actually points to. Regenerate it with `bag_converter.py`
+if the conversion logic changes.
 
 ## Why build from source instead of the PPA
 
 koide3 provides prebuilt packages via a PPA (`ros-jazzy-glim-ros`,
-`libgtsam-points-dev`), which is much faster to install. **As of July 2026, the
-CPU-only PPA packages for Ubuntu 24.04 were broken**: running `glim_rosbag` failed
-with `undefined symbol: _ZTVN5gtsam28PreintegratedImuMeasurementsE` — an ABI
+`libgtsam-points-dev`), which is much faster to install. We tried the
+CPU-only PPA packages for Ubuntu 24.04 but were broken (per July 2026). Running `glim_rosbag` failed
+with `undefined symbol: _ZTVN5gtsam28PreintegratedImuMeasurementsE`, which is an ABI
 mismatch between the packaged `libgtsam-notbb-dev 4.3.0` and the `gtsam_points`/
 `glim_ros` binaries. This was reproducible even after pinning to older,
 previously-matched package versions (1.2.0), so it isn't a version-skew issue we
-could fix by picking a different combination — it's a build inconsistency in the
+could fix by picking a different combination. It is a build inconsistency in the
 PPA itself. Building the full stack from source, all against the same GTSAM
-headers, avoids it entirely. If you want to try the PPA route first (it's worth
-a shot — may be fixed by the time you read this):
+headers, avoids it entirely. 
 
 ```bash
 curl -s https://koide3.github.io/ppa/setup_ppa.sh | sudo bash
@@ -173,7 +169,7 @@ Output (trajectory files, submaps, factor graph) is saved to `/tmp/dump`.
 
 ## Test dataset (demo / sanity check)
 
-Official GLIM demo bag, used to verify this whole pipeline works before pointing
+Official GLIM demo bag, used to verify if this whole pipeline works before pointing
 it at the project data (Test1_data):
 
 ```bash
@@ -193,7 +189,7 @@ ros2 run glim_ros glim_rosbag $(realpath data/os1_128_01_downsampled) --ros-args
 ## Custom ROS2 message packages
 
 This project depends on two non-standard ROS2 message packages that aren't part of
-a normal ROS2 install. Both live in `ros2_packages/` in this repo and get
+a normal ROS2 install. Both could be found in `ros2_packages/` in this repo and get
 symlinked into the colcon workspace (`~/ros2_ws/src/`) at build time.
 
 ## Data conversion pipeline (`scripts/bag_converter.py`)
@@ -221,9 +217,7 @@ performs three transformations on `/ouster/points` and `/ouster/imu_meas`:
    `timeoffset = (timestamp - first_timestamp) / 1e6`, i.e. **milliseconds**
    relative to the first point in each scan. Fix: rename the field to `time` and
    divide values by 1000 (ms -> s) during conversion, so GLIM's
-   `autoconf_perpoint_times` auto-detection picks it up correctly. Confirmed
-   working: the `per-point timestamps are not given!!` warning no longer appears
-   in GLIM's log after this fix.
+   `autoconf_perpoint_times` auto-detection picks it up correctly.
 
 Regenerate the converted bag after any change to the script:
 ```bash
@@ -234,7 +228,7 @@ python3 scripts/bag_converter.py data/Test1_data/rosbag data/Test1_data/rosbag_g
 ### `px4_msgs`
 
 Official PX4 message definitions (release/1.17), required to read the
-`/fmu/out/*` topics in the course rosbags. Not vendored in this repo — clone
+`/fmu/out/*` topics in the course rosbags. Not vendored in this repo. This should be cloned
 directly:
 
 ```bash
@@ -252,8 +246,8 @@ The given project rosbags publish IMU data (`/ouster/imu_meas`) and attitude
 of the standard `sensor_msgs/msg/Imu`. GLIM cannot subscribe to these directly.
 
 **There is no public `aspn_msgs` ROS2 package to install.** `aspn_msgs` is not a
-piece of software — it's an own implementation of the [ASPN 2023 ICD](https://github.com/Open-PNT/ASPN-ICD) 
-(a data schema *specification*, published as YAML, not code) with a `std_msgs/Header` added on
+piece of software, rather an own implementation of the [ASPN 2023 ICD](https://github.com/Open-PNT/ASPN-ICD) 
+(a data schema *specification* published as YAML) with a `std_msgs/Header` added on
 top. We reconstructed the `.msg` files ourselves directly from that spec, matching:
 
 - `measurements/measurement_IMU.yaml` → `MeasurementIMU.msg`
@@ -286,7 +280,7 @@ colcon build --packages-select aspn_msgs
 source install/setup.bash
 ```
 
-Re-verify against a bag at any time:
+Verify against a bag at any time:
 ```bash
 python3 scripts/verify_aspn_imu.py data/Test1_data/rosbag
 ```
@@ -295,7 +289,7 @@ python3 scripts/verify_aspn_imu.py data/Test1_data/rosbag
 
 We use `/ouster/imu_meas` (raw IMU) as GLIM's IMU source, not a Pixhawk topic.
 This raw IMU is physically internal to the Ouster LiDAR unit, and its axes already correspond to the LiDAR's own frame.
-**`T_lidar_imu` = identity** — no extrinsic calibration needed.
+**`T_lidar_imu` = identity**.
 
 ### Ground truth
 
@@ -327,38 +321,29 @@ output written to `/tmp/dump`.
 **Open / unresolved:**
 - **"Tornado" scattering artifact**: point clouds scatter heavily around the
   platform's own position, particularly noticeable when the platform is
-  stationary for an extended period. Not yet root-caused -- candidate
-  explanations include residual drift accumulation and/or submap loop-closure
-  weakness during long stationary segments, but this hasn't been confirmed.
-  Moving object "ghosting" (trailing point-cloud copies behind pedestrians) is
-  separately expected behavior for any point-cloud SLAM system without
-  dedicated dynamic-object filtering (not a bug).
+  stationary for an extended period. Not yet root-caused but the candidate
+  explanations include residual drift accumulation or submap loop-closure
+  weakness during long stationary segments. Moving object "ghosting" (trailing 
+  point-cloud copies e.g. behind pedestrians) occurs, especially for a point-cloud SLAM system without
+  dedicated dynamic-object filtering.
 - **Long-run performance on CPU**: global mapping cost grows over the course of
-  the ~13.7 min recording (denser submap-pair factor graph -- consistent with
+  the ~13.7 min recording (denser submap-pair factor graph, which is consistent with
   the GLIM paper's own reported behavior), causing the GUI to become slow/
-  unresponsive in the back half of a run on this hardware. Not a hang --
-  confirmed via `top` (high CPU%, not 0%) during an apparently "stuck" period.
-  Closing the GUI mid-run triggers a graceful partial save (whatever was
-  processed up to that point), it does not corrupt output.
-- **GNSS/camera fusion**: considered, not pursued. GLIM has no built-in GNSS
+  unresponsive in the back half of a run on this hardware. Also not a hang, confirmed via `top` (high CPU%, not 0%) 
+  during an apparently "stuck" period. Closing the GUI mid-run triggers a partial save (whatever was
+  processed up to that point) and does not corrupt output.
+- **GNSS/camera fusion**: considered but not pursued. GLIM has no built-in GNSS
   factor (would require writing a custom extension module via its "global
-  callback slot" mechanism -- out of scope given time). Visual constraints are
-  natively supported but require real D435i calibration (currently
-  placeholder values in `config_sensors.json`) and add compute overhead;
-  expected benefit (per the GLIM paper's own ablation study) is modest and not
-  clearly targeted at the scattering issue above. GNSS is used only as an
-  independent post-hoc evaluation reference (ground truth for RMSE), per the
-  assignment's own rubric -- not fused into the estimator.
+  callback slot" mechanism). Visual constraints are natively supported but require real D435i 
+  calibration (currently placeholder values in `config_sensors.json`).
 
 ## Status / Next steps
 - [x] CPU-only GLIM build working
 - [x] Verified against official demo dataset
 - [x] Custom `aspn_msgs` package reconstructed and verified
 - [x] Bag conversion pipeline (IMU type + accel sign + deskewing timestamps)
-- [x] Run against Test1 course dataset (partial -- see known issues)
+- [x] Run against Test1 course dataset (partial)
 - [ ] Run Test1 to full completion
-- [ ] Run against Test2 course dataset
 - [ ] Export trajectory to LatLon CSV
 - [ ] Compute RMSE vs GNSS ground truth (`xtrack_global_position_t12.csv`)
 - [ ] Export point cloud map as `.pcd`
-- [ ] Final report + code cleanup + teaser video
