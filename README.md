@@ -3,7 +3,7 @@
 src="https://github.com/user-attachments/assets/8927424c-57e8-4176-9076-d3b6719260ea"
 loop autoplay muted controls></video>
 
-
+# Code architecture
 ## 1. Overview of Files and Scripts
 
 The following scripts and configurations work together to perform the mapping:
