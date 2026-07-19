@@ -2,6 +2,7 @@ data/
 build/
 install/
 log/
+results/
 *.tar.gz
 *.db3
 imgui.ini
