@@ -10,19 +10,45 @@ loop autoplay muted controls></video>
 
 ## 1. Code Architecture
 
-The system is deployed using a containerized **ROS Melodic** environment. This isolates the legacy ROS 1 dependencies of LIO-SAM 6AXIS from the modern host machine while enabling robust data processing. The complete pipeline is illustrated in the diagram below:
+### 1.1 Branch Structure
+The repository is organized into the following key directories to maintain a clean separation of concerns:
+*   `bag_preparation/`: Contains Python scripts used to convert and synchronize raw ROS 2 data bags into a format readable by our SLAM core.
+*   `config/` & `src/`: Core configuration files and patched C++ source files for the LIO-SAM 6AXIS algorithm.
+*   `bags/` & `data/`: Data storage directories containing the input rosbags and Ground Truth JSON/CSV files.
+*   `scripts/`: Python scripts for evaluating and visualizing the final trajectories (e.g., Plotly comparisons).
+*   `output/` (incl. `maps/`): Destination folders for generated 3D `.pcd` point clouds and optimized trajectory logs.
+
+### 1.2 Data Pre-Processing
+The core data for this module is provided as **Test 1**, recorded by an XTrack vehicle platform. Crucially, the raw data is provided as a **ROS 2 Bagfile**, while LIO-SAM 6AXIS requires **ROS 1 Melodic** to function. Furthermore, the raw sensor messages use proprietary or hardware-specific binary payloads that standard SLAM nodes cannot interpret.
+
+**Topic Requirements & Conversion:**
+The system specifically targets three raw data streams:
+
+| Sensor Source | Original ROS 2 Topic | Original Format | Required LIO-SAM Topic | Required ROS 1 Format |
+| :--- | :--- | :--- | :--- | :--- |
+| **LiDAR** | `/ouster/points` | `sensor_msgs/PointCloud2` | `/os_cloud_node/points` | `sensor_msgs/PointCloud2` |
+| **IMU** | `/ouster/imu_meas` | Proprietary Binary Payload | `/stim300/imu/data_raw` | `sensor_msgs/Imu` |
+| **GNSS/GPS** | `/fmu/out/vehicle_gps_position` | Proprietary Binary Payload | `/gps/fix` | `sensor_msgs/NavSatFix` |
+
+To bridge the gap between the raw ROS 2 inputs and the ROS 1 LIO-SAM requirements, the `bag_preparation` directory contains two vital scripts:
+1.  **`convert_bag.py`**: Reads the ROS 2 bag and unpacks the proprietary binary payloads of the Ouster IMU and PX4 Autopilot GPS into standard `sensor_msgs/Imu` and `sensor_msgs/NavSatFix` messages.
+2.  **`fix_ouster_bag.py`**: Ouster sensors without PTP time synchronization suffer from highly asynchronous timestamps between the LiDAR and IMU. This script smooths and aligns these timestamps within the bag file; without this, the LIO-SAM factor graph crashes immediately upon initialization.
+
+### 1.3 Containerized Pipeline
+After pre-processing, the system is deployed using a containerized **ROS Melodic** environment. This isolates the legacy ROS 1 dependencies from the modern host machine. The complete pipeline is illustrated in the diagram below:
 
 ```mermaid
 flowchart TD
     subgraph Data Input
-        B1[(Raw Rosbag)] -->|LiDAR + IMU Data| P1(fix_ouster_bag.py)
+        B1[(Raw ROS 2 Bag)] -->|Extract Binaries| conv(convert_bag.py)
+        conv -->|Standard ROS msgs| P1(fix_ouster_bag.py)
         P1 -->|Repaired Timestamps| B2[(lio_sam_ready.bag)]
         GNSS[(GNSS Data)]
     end
 
     subgraph Docker Container: ROS Melodic
         patch(patch_yaml.py) -.->|Modifies config| core
-        B2 -->|Playback| core{LIO-SAM 6AXIS Core}
+        B2 -->|Playback & Remap| core{LIO-SAM 6AXIS Core}
         GNSS -->|5m threshold triggers| core
         core -->|Mapping| pcd[.pcd Point Clouds]
         core -->|Odometry| txt[optimized_odom.txt]
@@ -35,11 +61,10 @@ flowchart TD
     end
 ```
 
-### Components
-1. **Data Pre-processing (`fix_ouster_bag.py`)**: Synchronizes asynchronous Ouster IMU and LiDAR timestamps inside the `.db3` / `.bag` file.
-2. **Containerization (`docker-compose.yml`)**: Spawns an isolated `lio_sam_6axis` environment.
-3. **Dynamic Configuration (`patch_yaml.py`)**: Automatically injects dynamic hardware variables and noise tolerances directly into the LIO-SAM parameter files before execution.
-4. **Execution Script (`run_lio_sam.sh` & `run_lio_sam_gnss.sh`)**: Orchestrates the time-synchronized playback, remapping of sensor topics (`/ouster/points` $\rightarrow$ `/os_cloud_node/points`), and triggers auto-saving upon completion.
+**Pipeline Components:**
+*   **Containerization (`docker-compose.yml`)**: Spawns an isolated `lio_sam_6axis` environment.
+*   **Dynamic Configuration (`patch_yaml.py`)**: Automatically injects dynamic hardware variables and noise tolerances directly into the LIO-SAM parameter files before execution.
+*   **Execution Scripts (`run_lio_sam.sh` & `run_lio_sam_gnss.sh`)**: Orchestrates the time-synchronized playback, remaps the topics from the ROS 2 bag to the ROS 1 node names (as shown in the table above), and triggers auto-saving of the map upon completion.
 
 ---
 
