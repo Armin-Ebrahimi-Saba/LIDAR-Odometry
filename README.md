@@ -1,6 +1,6 @@
 # Sensor System Report: Application of LIO-SAM 6AXIS
 <video
-src="./results/videos/LIO_SAM_6AXIS_without_GNSS_Test1_edited.mp4"
+src="https://github.com/user-attachments/assets/8927424c-57e8-4176-9076-d3b6719260ea"
 loop autoplay muted controls></video>
 
 
