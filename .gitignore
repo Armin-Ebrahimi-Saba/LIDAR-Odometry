@@ -7,3 +7,6 @@ rosbag_new/
 # Maps
 maps/
 *.pcd
+
+bags/
+output/

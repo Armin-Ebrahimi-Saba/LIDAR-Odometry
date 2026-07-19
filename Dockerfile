@@ -1,6 +1,6 @@
 FROM zhangkin/lio_sam_6axis
 
-COPY patch.py /patch.py
+COPY scripts/patch.py /patch.py
 
 # Fix the Eigen unaligned array assertion and subsequent segfaults.
 # GTSAM was built without AVX, while LIO-SAM was built with -march=native (AVX).
