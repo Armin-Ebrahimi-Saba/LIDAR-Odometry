@@ -19,19 +19,19 @@ The repository is organized into the following key directories to maintain a cle
 *   `output/` (incl. `maps/`): Destination folders for generated 3D `.pcd` point clouds and optimized trajectory logs.
 
 ### 1.2 Data Pre-Processing
-The core data for this module is provided as **Test 1**, recorded by an XTrack vehicle platform. Crucially, the raw data is provided as a **ROS 2 Bagfile**, while LIO-SAM 6AXIS requires **ROS 1 Melodic** to function. Furthermore, the raw sensor messages use proprietary or hardware-specific binary payloads that standard SLAM nodes cannot interpret.
+The core data for this module is provided as **Test 1**, recorded by an XTrack vehicle platform. Crucially, the raw data is provided as a **ROS 2 Bagfile**, while LIO-SAM 6AXIS requires **ROS 1 Melodic** to function. Furthermore, the raw sensor messages are published in hardware-specific ROS 2 message types that standard SLAM nodes cannot interpret directly.
 
 **Topic Requirements & Conversion:**
 The system specifically targets three raw data streams:
 
-| Sensor Source | Original ROS 2 Topic | Original Format | Required LIO-SAM Topic | Required ROS 1 Format |
+| Sensor Source | Original ROS 2 Topic | Original Message Type | Required LIO-SAM Topic | Required Message Type |
 | :--- | :--- | :--- | :--- | :--- |
 | **LiDAR** | `/ouster/points` | `sensor_msgs/PointCloud2` | `/os_cloud_node/points` | `sensor_msgs/PointCloud2` |
-| **IMU** | `/ouster/imu_meas` | Proprietary Binary Payload | `/stim300/imu/data_raw` | `sensor_msgs/Imu` |
-| **GNSS/GPS** | `/fmu/out/vehicle_gps_position` | Proprietary Binary Payload | `/gps/fix` | `sensor_msgs/NavSatFix` |
+| **IMU** | `/ouster/imu_meas` | Ouster-specific Message | `/stim300/imu/data_raw` | `sensor_msgs/Imu` |
+| **GNSS/GPS** | `/fmu/out/vehicle_gps_position` | `px4_msgs/SensorGps` | `/gps/fix` | `sensor_msgs/NavSatFix` |
 
 To bridge the gap between the raw ROS 2 inputs and the ROS 1 LIO-SAM requirements, the `bag_preparation` directory contains two vital scripts:
-1.  **`convert_bag.py`**: Reads the ROS 2 bag and unpacks the proprietary binary payloads of the Ouster IMU and PX4 Autopilot GPS into standard `sensor_msgs/Imu` and `sensor_msgs/NavSatFix` messages.
+1.  **`convert_bag.py`**: Reads the ROS 2 bag and converts the hardware-specific message types of the Ouster IMU and PX4 Autopilot GPS into standard `sensor_msgs/Imu` and `sensor_msgs/NavSatFix` messages.
 2.  **`fix_ouster_bag.py`**: Ouster sensors without PTP time synchronization suffer from highly asynchronous timestamps between the LiDAR and IMU. This script smooths and aligns these timestamps within the bag file; without this, the LIO-SAM factor graph crashes immediately upon initialization.
 
 ### 1.3 Containerized Pipeline
