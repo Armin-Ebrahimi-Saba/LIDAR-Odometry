@@ -89,7 +89,10 @@ Wir haben gezielte C++ Patches tief in die Architektur von LIO-SAM injiziert, um
    *   **Coordinate System Rotation:** Die ENU-Koordinaten (East-North-Up) werden explizit rotiert, um sich an den initialen Winkel (Yaw) der lokalen LiDAR-Odometry anzupassen (`calib_enu(0) = rx; calib_enu(1) = ry;`).
    *   **Covariance Injection:** Die echten Messungenauigkeiten (`covariance`) aus der ROS 2 Bag (`msg->position_covariance`) werden direkt in die `nav_msgs::Odometry` Nachricht für den Factor-Graph weitergeleitet, anstatt fehleranfällige Standardwerte zu verwenden.
 
-2. **Automated Docker Patches (`patch.py` zur Laufzeit/Buildzeit):**
+2. **`mapOptmizationGps.cpp` (Factor Graph Integration):**
+   *   **GTSAM Node Injection:** Diese Datei (welche zur Laufzeit aktiv gemountet wird) enthält die erweiterte Backend-Logik, um die vorverarbeitete GNSS-Odometrie überhaupt in den Non-Linear Factor Graph (GTSAM) einspeisen zu können. Hier werden die absoluten GNSS-Koordinaten als verankerte "Prior Factors" in die globale Trajektorienoptimierung eingebunden. Ohne diese angepasste Logik würde LIO-SAM die GPS-Pings schlichtweg ignorieren.
+
+3. **Automated Docker Patches (`patch.py` zur Laufzeit/Buildzeit):**
    *   **Eigen Alignment Fix:** Automatisches Hinzufügen des Makros `EIGEN_MAKE_ALIGNED_OPERATOR_NEW` in alle Kernklassen (wie `ParamServer`, `mapOptimization`), um Memory-Segfaults auf modernen Prozessoren (AVX/AVX2) bei der Speicherallokation zu verhindern.
    *   **Ouster Timestamp Struct:** Modifikation des Structs `OusterPointXYZIRT`, sodass der Zeitstempel `t` exakt zur Skalierung der Bags passt (`dst.time = src.t * 1e-9f;`), andernfalls stürzt die Point-Cloud Registrierung ab.
 
