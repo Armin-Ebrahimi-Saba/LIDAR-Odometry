@@ -16,11 +16,7 @@ The repository is organized into the following key directories to maintain a cle
 ```text
 .
 ├── bag_preparation/      <- Scripts to convert and synchronize raw ROS 2 bags
-├── bags/                 <- Data storage for pre-processed, SLAM-ready rosbags
-├── config/               <- Core configuration files for the LIO-SAM 6AXIS algorithm
-├── data/                 <- Storage for Ground Truth JSON/CSV files
-├── output/               <- Destination for 3D .pcd maps and optimized trajectory logs
-├── scripts/              <- Evaluation and visualization scripts (e.g., Plotly comparisons)
+├── scripts/              <- Execution and configuration scripts for LIO-SAM
 └── src/                  <- Patched C++ source files for LIO-SAM 6AXIS
 ```
 
@@ -59,12 +55,6 @@ flowchart TD
         core -->|Mapping| pcd[.pcd Point Clouds]
         core -->|Odometry| txt[optimized_odom.txt]
     end
-
-    subgraph Evaluation
-        txt --> plot(plot_comparison.py)
-        GNSS --> plot
-        plot --> html[plot_viewer_map.html]
-    end
 ```
 
 **Pipeline Components:**
@@ -100,7 +90,7 @@ We injected custom patches into the core LIO-SAM architecture (`simpleGpsOdom_pa
 
 ## 3. Results & Evaluation
 
-The final evaluation was conducted using custom Python scripts (`plot_comparison.py`) running entirely outside of ROS, relying on standard libraries to compare the drifting trajectories against the high-accuracy Ground Truth.
+The final evaluation was conducted using custom Python scripts (`plot_comparison.py`) running entirely outside of ROS, relying on standard libraries to compare the drifting trajectories against the high-accuracy Ground Truth. *(Note: The raw data, outputs, and evaluation scripts have been omitted from this slimmed-down repository delivery).*
 
 ### 3.1 Evaluation Pipeline
 1. `extract_origin.py` reads the initial reference angle (Yaw) and the starting LLA coordinates.
