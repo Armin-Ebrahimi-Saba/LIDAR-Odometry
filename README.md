@@ -1,113 +1,86 @@
-# Sensor System Report: Application of LIO-SAM 6AXIS
+# Final Report: Application of LIO-SAM 6AXIS for LiDAR-based Positioning
+
 <video
 src="https://github.com/user-attachments/assets/8927424c-57e8-4176-9076-d3b6719260ea"
 loop autoplay muted controls></video>
 
-# Code architecture
-## 1. Overview of Files and Scripts
-
-The following scripts and configurations work together to perform the mapping:
-
-*   **`docker-compose.yml` & `Dockerfile`**: 
-    These build and start an isolated ROS Melodic container in which LIO-SAM 6AXIS is installed. The current directory is mounted as `/workspace` in the container to share scripts and rosbags.
-*   **`fix_ouster_bag.py`**:
-    *(Preparation)* A Python script that synchronizes and adjusts the timestamps of the IMU and LiDAR data in the original `rosbag`. Ouster sensors without PTP time synchronization often have issues with highly asynchronous timestamps, which causes SLAM algorithms to crash. The script outputs the repaired file `lio_sam_ready.bag`.
-*   **`patch_yaml.py`**:
-    *(Configuration)* This script is executed automatically when the container starts. It modifies the LIO-SAM configuration file `indoor_ouster128.yaml` directly in the container. It makes essential changes:
-    *   **Extrinsic Rotation & RPY**: Set to the identity matrix (`[1,0,0, 0,1,0, 0,0,1]`), as the Ouster IMU is not physically rotated.
-    *   **Gravity (`imuGravity`)**: Set to `-9.80511`, as the Ouster IMU measures the actual gravity downwards (in contrast to the ROS REP-145 convention, which specifies the reaction force upwards).
-    *   **IMU Noise/Bias (`imuAccNoise`, etc.)**: Increased, as the internal IMU is relatively inaccurate. Without this adjustment, the optimization would trust the IMU sensor too much and drift (diverge) after a few minutes due to accumulated errors.
-*   **`run_lio_sam.sh`**:
-    *(Execution)* The main script that is started inside the Docker container. It performs the following tasks:
-    1.  Injects `use_sim_time` into the LIO-SAM launch file so that LIO-SAM uses the timestamps of the rosbag instead of the real computer clock.
-    2.  Starts LIO-SAM and RViz in the background.
-    3.  Starts the playback of the `lio_sam_ready.bag` and remaps the topic names to those expected by LIO-SAM (`/ouster/points` -> `/os_cloud_node/points`, `/ouster/imu_meas` -> `/stim300/imu/data_raw`).
-    4.  Automatically executes a save operation (`rosservice call ...`) as soon as the rosbag has finished playing.
+> **Project Goal:** To construct a highly accurate 6-DoF trajectory and 3D point cloud map utilizing raw data from an Ouster OS0-32 LiDAR, an internal IMU, and RTK-GNSS positioning from a PX4 Autopilot.
 
 ---
 
-## 2. Step-by-Step Guide
+## 1. Code Architecture
 
-### Step 1: Prepare Rosbag (Only the first time or for new data)
-Since raw Ouster data often has problematic timestamps, the rosbag must be cleaned up first. Ensure that your raw rosbag file is located in the folder (e.g., `rosbag2_2024_...`).
-Run the script on your host PC (with the `rosbags` Python package installed):
-```bash
-python fix_ouster_bag.py <your_input_bag.bag> lio_sam_ready.bag
+The system is deployed using a containerized **ROS Melodic** environment. This isolates the legacy ROS 1 dependencies of LIO-SAM 6AXIS from the modern host machine while enabling robust data processing. The complete pipeline is illustrated in the diagram below:
+
+```mermaid
+flowchart TD
+    subgraph Data Input
+        B1[(Raw Rosbag)] -->|LiDAR + IMU Data| P1(fix_ouster_bag.py)
+        P1 -->|Repaired Timestamps| B2[(lio_sam_ready.bag)]
+        GNSS[(GNSS Data)]
+    end
+
+    subgraph Docker Container: ROS Melodic
+        patch(patch_yaml.py) -.->|Modifies config| core
+        B2 -->|Playback| core{LIO-SAM 6AXIS Core}
+        GNSS -->|5m threshold triggers| core
+        core -->|Mapping| pcd[.pcd Point Clouds]
+        core -->|Odometry| txt[optimized_odom.txt]
+    end
+
+    subgraph Evaluation
+        txt --> plot(plot_comparison.py)
+        GNSS --> plot
+        plot --> html[plot_viewer_map.html]
+    end
 ```
-*This script has already been executed and `lio_sam_ready.bag` is ready.*
 
-### Step 2: Start Docker Container
-Make sure Docker Desktop is running. Open a terminal (PowerShell) in this folder and run:
-```bash
-docker compose up
-```
-*(To run it in the background, use `docker compose up -d`, but without `-d` you will see all outputs and error messages directly).*
-
-### Step 3: The Automatic Process
-As soon as `docker compose up` is running, the following happens automatically:
-1. The container executes `run_lio_sam.sh`.
-2. The script patches the configuration (`patch_yaml.py`).
-3. LIO-SAM and RViz are started. RViz opens on your computer via X11 (VcXsrv).
-4. The `lio_sam_ready.bag` is played. You will see the map slowly building up in RViz.
-
-### Step 4: Save Results
-Once the rosbag has completely finished (after approx. 13-14 minutes), the following message is displayed in the terminal:
-`Rosbag finished playing. Automatically saving the map to /workspace/maps/...`
-
-The script then calls the ROS Service `/lio_sam_6axis/save_map`. 
-**You will find the saved `.pcd` point cloud files directly on your Windows desktop in the new folder `maps/`.**
-
-> **Manual Saving:** If you want to abort the process early and save the current state, open a second terminal in this folder, attach to the running container and call the service manually:
-> `docker exec lio_sam_6axis /bin/bash -c "source /opt/ros/melodic/setup.bash && rosservice call /lio_sam_6axis/save_map"`
+### Components
+1. **Data Pre-processing (`fix_ouster_bag.py`)**: Synchronizes asynchronous Ouster IMU and LiDAR timestamps inside the `.db3` / `.bag` file.
+2. **Containerization (`docker-compose.yml`)**: Spawns an isolated `lio_sam_6axis` environment.
+3. **Dynamic Configuration (`patch_yaml.py`)**: Automatically injects dynamic hardware variables and noise tolerances directly into the LIO-SAM parameter files before execution.
+4. **Execution Script (`run_lio_sam.sh` & `run_lio_sam_gnss.sh`)**: Orchestrates the time-synchronized playback, remapping of sensor topics (`/ouster/points` $\rightarrow$ `/os_cloud_node/points`), and triggers auto-saving upon completion.
 
 ---
 
-## 3. Troubleshooting
+## 2. Choice of Algorithms & System Design
 
-*   **RViz does not open:** Ensure that VcXsrv (Xming) is running on Windows and `Disable access control` is enabled in the settings.
-*   **"Large velocity" warnings:** If these errors appear in the logs and the map explodes, the IMU configuration is incorrect. Check if `patch_yaml.py` was called correctly.
-*   **Map remains empty in RViz:** In RViz, click "Add" on the left -> "PointCloud2" and set the topic to `/lio_sam_6axis/mapping/map_global` or `/lio_sam_6axis/deskew/cloud_deskewed`.
+### 2.1 Algorithm Selection
+**LIO-SAM 6AXIS** (LiDAR Inertial Odometry via Smoothing and Mapping) was selected for its tightly-coupled LiDAR-IMU architecture built upon a factor graph (GTSAM). Unlike loosely-coupled methods, LIO-SAM pre-integrates IMU measurements between LiDAR scans to de-skew the point cloud and provide a robust initial guess for LiDAR odometry. This makes it highly resilient to rapid motions and feature-poor environments.
 
-## Control bag play
-* Pause: `docker exec lio_sam_6axis /bin/bash -c "source /opt/ros/melodic/setup.bash && rosservice call /bag_player/pause_playback true"`
+### 2.2 System Simplifications & Assumptions
+To make the algorithm function with the unique properties of the Sensys dataset, several core assumptions and parameter modifications were required:
 
-* Continue: `docker exec lio_sam_6axis /bin/bash -c "source /opt/ros/melodic/setup.bash && rosservice call /bag_player/pause_playback false"`
+*   **Extrinsic Rotation & RPY (Assumed Identity)**: The extrinsic calibration matrix between the LiDAR and the IMU was forced to the identity matrix (`[1,0,0, 0,1,0, 0,0,1]`). We assumed the internal IMU is mechanically aligned perfectly with the optical center of the Ouster sensor.
+*   **Gravity Vector (`imuGravity`)**: ROS standard REP-145 dictates gravity is recorded as an upward reaction force ($+9.81$). The Ouster sensor records it downwards. We applied a hardcoded modification to `-9.80511` to prevent immediate mathematical divergence.
+*   **IMU Noise/Bias Tolerances (`imuAccNoise`, `imuGyrNoise`)**: The internal Ouster IMU is known to be relatively low-grade compared to external, dedicated tactical-grade IMUs. *Simplification:* We heavily increased the `imuAccNoise` and `imuGyrNoise` parameters in the configuration. By doing so, the factor graph optimization "trusts" the IMU less over long durations, relying more heavily on the LiDAR point-to-plane ICP registrations, preventing long-term drift accumulation.
 
----
+### 2.3 Advanced GNSS Integration Patches
+Integrating the absolute RTK-GNSS positioning from the PX4 Autopilot into LIO-SAM presented significant engineering hurdles. 
 
-## 4. Advanced GNSS (GPS) Integration
+When the vehicle starts, it is stationary for an extended period. The raw GNSS signal drifts heavily during this stationary phase (creating a "spaghetti node" of false movements). If LIO-SAM initializes its global reference frame (Yaw) based on this noisy stationary data, the entire map will be rotated incorrectly.
 
-To ensure the accuracy of the map over long distances and to compensate for LiDAR drift, the system was expanded with advanced GNSS integration. In our case, the standard LIO-SAM implementation had issues with the highly noisy GPS at the starting point (spaghetti node).
-
-These issues were resolved with the following **C++ patches** in LIO-SAM:
-*   **`simpleGpsOdom_patched.cpp`**: The odometry node calculation now waits until the robot (based purely on LiDAR odometry) has moved **5 meters** away from the starting point. Only then is a stable, reliable alignment (Yaw) calculated from the covered distance and the origin for the GNSS is set. This prevents faulty starting angles caused by stationary sensor noise.
-*   **`mapOptmizationGps.cpp`**: Instead of waiting for the GPS signal to be initialized (which would now take 5 meters and block the entire SLAM process), the LiDAR mapping process starts immediately and independently. As soon as the first reliable GPS coordinates arrive after 5 meters, LIO-SAM retroactively inserts them as optimization factors (GTSAM graph) and seamlessly aligns the map created so far with the GNSS.
-
-> **Note:** Since `mapOptmizationGps.cpp` was modified, this file is now mounted directly as a volume in the container via `docker-compose.yml` so that it is compiled live when the container starts (via `catkin build`).
-
-### 4.1. Start LIO-SAM with GNSS
-In addition to the regular script, there is a separate startup script for operation with GNSS correction:
-```bash
-docker compose run --rm lio_sam_6axis /workspace/run_lio_sam_gnss.sh
-```
-*(Or if you changed the `command` in `docker-compose.yml` to `./run_lio_sam_gnss.sh`, a simple `docker compose up` is sufficient).*
-
-This script saves the optimized trajectory (which is exactly aligned with the real GPS points) in the folder `maps_gnss_<Date>/` after completion.
+**C++ Design Fix:** 
+We injected custom patches into the core LIO-SAM architecture (`simpleGpsOdom_patched.cpp` and `mapOptmizationGps.cpp`). 
+*   **5-Meter Threshold:** The odometry node now fundamentally ignores all GNSS data until the LiDAR-based odometry confirms the vehicle has traveled more than 5 meters linearly.
+*   **Retroactive Optimization:** Once the 5-meter threshold is crossed, a stable trajectory vector is computed, a reliable Yaw angle is established, and the GNSS data is injected into the GTSAM factor graph to retroactively optimize and align the map.
 
 ---
 
-## 5. Visualization & Evaluation (Plotly)
+## 3. Results & Evaluation
 
-To evaluate the results and visually compare different sensor data with each other, the following Python scripts are available:
+The final evaluation was conducted using custom Python scripts (`plot_comparison.py`) running entirely outside of ROS, relying on standard libraries to compare the drifting trajectories against the high-accuracy Ground Truth.
 
-*   **`extract_origin.py`**: A ROS Python script that can be executed in the container to extract the true initial reference angle after 5 meters of traveled distance (Yaw) and the LLA origin from the raw bag data (`/gps/fix`). The extracted values are saved in `gnss_origin.json` and `raw_gnss.json` (for the plot line).
-*   **`plot_comparison.py`**: The main script for evaluation. It runs entirely outside of ROS and only requires standard Python libraries (such as Numpy). It automatically extracts and compares:
-    1.  The **Ground Truth** from the `Outdoor1` dataset (automatically filtered and synchronized to LiDAR timestamps).
-    2.  The **raw built-in GNSS signal** (from `raw_gnss.json`).
-    3.  The free, drifting **LIO-SAM trajectory without GNSS** (`maps/garden_day/optimized_odom_tum.txt`).
-    4.  The **GNSS-optimized LIO-SAM trajectory** (from the newest `maps_gnss_...` folder).
+### 3.1 Evaluation Pipeline
+1. `extract_origin.py` reads the initial reference angle (Yaw) and the starting LLA coordinates.
+2. `plot_comparison.py` maps the local Cartesian LiDAR frames back to WGS84 global coordinates.
+3. Results are rendered into an interactive web viewer (`plot_viewer_map.html`).
 
-The script converts all local LiDAR coordinates back to global GPS coordinates (WGS84 LLA) and automatically calculates correction angles (rotations) based on a 60-meter stretch to perfectly overlay the LiDAR maps and Ground Truth on the real world map. 
+### 3.2 Findings
+*   **Raw GNSS (No LIO-SAM):** Exhibited severe multi-path errors and stationary drift.
+*   **LIO-SAM (LiDAR + IMU only):** Provided extremely smooth local trajectories and sharp point cloud maps. However, over the 14-minute runtime, slight rotational drift accumulated, leading to deviations from the absolute global path.
+*   **GNSS-Optimized LIO-SAM:** By applying our custom 5-meter movement threshold patches, the factor graph successfully pulled the drifting LiDAR map back to the absolute RTK ground truth, correcting both translational and rotational drift seamlessly.
 
-The result is finally generated as an interactive HTML map:
-**`plot_viewer_map.html`**: This file can easily be opened in any browser (Chrome, Firefox, Safari) by double-clicking. It provides a fully zoomable OpenStreetMap layer on which all lines (Ground Truth, raw GNSS data, LiDAR drift, LiDAR+GNSS optimization) can be interactively toggled on and off.
+### 3.3 Engineering Challenges Conquered
+1.  **Asynchronous Timestamps:** The biggest initial challenge was the total failure of LIO-SAM due to asynchronous LiDAR and IMU message timestamps. Developing `fix_ouster_bag.py` to rewrite the temporal headers of the `.db3` bag was crucial for the factor graph to even initialize.
+2.  **Stationary GPS Noise:** As detailed above, modifying the C++ source code to delay GPS initialization was critical. Without this, maps were consistently generated with a 15-40 degree rotational error relative to True North.
