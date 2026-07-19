@@ -8,5 +8,5 @@ rosbag_new/
 maps/
 *.pcd
 
-bags/
+bags/*
 output/
