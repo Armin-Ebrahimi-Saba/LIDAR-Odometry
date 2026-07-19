@@ -81,10 +81,17 @@ Integrating the absolute RTK-GNSS positioning from the PX4 Autopilot into LIO-SA
 
 When the vehicle starts, it is stationary for an extended period. The raw GNSS signal drifts heavily during this stationary phase (creating a "spaghetti node" of false movements). If LIO-SAM initializes its global reference frame (Yaw) based on this noisy stationary data, the entire map will be rotated incorrectly.
 
-**C++ Design Fix:** 
-We injected custom patches into the core LIO-SAM architecture (`simpleGpsOdom_patched.cpp` and `mapOptmizationGps.cpp`). 
-*   **5-Meter Threshold:** The odometry node now fundamentally ignores all GNSS data until the LiDAR-based odometry confirms the vehicle has traveled more than 5 meters linearly.
-*   **Retroactive Optimization:** Once the 5-meter threshold is crossed, a stable trajectory vector is computed, a reliable Yaw angle is established, and the GNSS data is injected into the GTSAM factor graph to retroactively optimize and align the map.
+**Detailed Source Code Patches:** 
+Wir haben gezielte C++ Patches tief in die Architektur von LIO-SAM injiziert, um es robuster zu machen. Die wichtigsten Anpassungen im Detail:
+
+1. **`simpleGpsOdom_patched.cpp` (GNSS Odometry Injection):**
+   *   **5-Meter Initialization Threshold:** Einbau eines Distanz-Checks (`if (distance > 5.0)`). Das System ignoriert alle GNSS-Daten und initialisiert die globale Orientierung (Yaw) erst, wenn das Fahrzeug sich physisch 5 Meter vom Startpunkt wegbewegt hat. Das verhindert das "Spaghetti-Driften" im Stand.
+   *   **Coordinate System Rotation:** Die ENU-Koordinaten (East-North-Up) werden explizit rotiert, um sich an den initialen Winkel (Yaw) der lokalen LiDAR-Odometry anzupassen (`calib_enu(0) = rx; calib_enu(1) = ry;`).
+   *   **Covariance Injection:** Die echten Messungenauigkeiten (`covariance`) aus der ROS 2 Bag (`msg->position_covariance`) werden direkt in die `nav_msgs::Odometry` Nachricht für den Factor-Graph weitergeleitet, anstatt fehleranfällige Standardwerte zu verwenden.
+
+2. **Automated Docker Patches (`patch.py` zur Laufzeit/Buildzeit):**
+   *   **Eigen Alignment Fix:** Automatisches Hinzufügen des Makros `EIGEN_MAKE_ALIGNED_OPERATOR_NEW` in alle Kernklassen (wie `ParamServer`, `mapOptimization`), um Memory-Segfaults auf modernen Prozessoren (AVX/AVX2) bei der Speicherallokation zu verhindern.
+   *   **Ouster Timestamp Struct:** Modifikation des Structs `OusterPointXYZIRT`, sodass der Zeitstempel `t` exakt zur Skalierung der Bags passt (`dst.time = src.t * 1e-9f;`), andernfalls stürzt die Point-Cloud Registrierung ab.
 
 ---
 

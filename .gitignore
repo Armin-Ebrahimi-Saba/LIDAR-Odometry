@@ -25,3 +25,7 @@ __pycache__/
 *.pyc
 .env
 venv/
+
+# Ignore Original Read-Copies
+src/LIO-SAM-6AXIS-src/*
+!src/LIO-SAM-6AXIS-src/mapOptmizationGps.cpp
