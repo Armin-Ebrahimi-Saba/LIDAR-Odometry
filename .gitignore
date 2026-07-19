@@ -1,6 +1,7 @@
 # ---- Data & generated outputs ----
 # Large LiDAR/GNSS datasets and rosbags (52G+); keep out of version control
 data/
+test2/
 outputs/
 *.db3
 *.laz

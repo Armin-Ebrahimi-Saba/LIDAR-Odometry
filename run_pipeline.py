@@ -3,13 +3,15 @@
 
 Stages (run with --stage, or 'all' to run everything in order):
   1. timestamps -- pair .laz scans with bag-recorded timestamps
-  2. odometry   -- KISS-ICP odometry/SLAM -> local poses + 3D map,
+  2. odometry   -- KISS-ICP odometry -> local poses + 3D map,
                     seeded at the first GNSS ground-truth point
   3. align      -- Umeyama SE(3) georeference to GNSS -> lat/lon
   4. velocity   -- finite-difference the trajectory -> NED velocity
   5. evaluate   -- RMSE + error-over-time plot vs. ground truth
   6. map        -- render odometry + GNSS on OpenStreetMap (HTML)
   7. map3d      -- render the SLAM 3D point-cloud map (interactive HTML)
+  8. colormaps  -- colour the 3D map: map_local_height.pcd (by elevation) and
+                    map_local_intensity.pcd (by the LiDAR's per-point return)
 
 `--stage X` runs stage X and every stage after it (they chain off each other),
 so `--stage align` re-does align -> velocity -> evaluate -> map -> map3d.
@@ -34,7 +36,8 @@ from sensys_slam.align import align_and_georeference
 from sensys_slam.velocity import compute_ned_velocity
 from sensys_slam.evaluate import evaluate_against_ground_truth
 
-ALL_STAGES = ["timestamps", "odometry", "align", "velocity", "evaluate", "map", "map3d"]
+ALL_STAGES = ["timestamps", "odometry", "align", "velocity", "evaluate", "map",
+              "map3d", "colormaps"]
 
 
 def load_config(path: str) -> dict:
@@ -171,7 +174,7 @@ def main():
         ref_origin = (o["lat0"], o["lon0"], o["alt0"])
         evaluate_against_ground_truth(traj_df, gt_df, ref_origin, cfg, str(out_dir))
 
-    if "map" in stages or "map3d" in stages:
+    if any(s in stages for s in ("map", "map3d", "colormaps")):
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
 
@@ -184,6 +187,20 @@ def main():
         print("\n== Stage 7: rendering SLAM 3D point-cloud map ==")
         from plot_map3d import make_map3d
         make_map3d(args.config)
+
+    if "colormaps" in stages:
+        print("\n== Stage 8: building coloured 3D point-cloud maps ==")
+        from colorize_map import colorize_by_height
+        from rebuild_map import rebuild_map
+        map_path = out_dir / "map_local.pcd"
+        if not map_path.exists():
+            raise SystemExit(f"{map_path} not found -- run the odometry stage first.")
+        # Height: instant post-process of the accumulated map (no bag read).
+        colorize_by_height(map_path, out_dir / "map_local_height.pcd")
+        # Intensity: re-read the bag to attach the LiDAR's per-point return. Pass
+        # the same frame range odometry used so the map matches poses_local.csv.
+        rebuild_map(args.config, output=str(out_dir / "map_local_intensity.pcd"),
+                    color="intensity", frame_start=frame_start, frame_end=frame_end)
 
     print("\nDone. Outputs in:", out_dir.resolve())
 

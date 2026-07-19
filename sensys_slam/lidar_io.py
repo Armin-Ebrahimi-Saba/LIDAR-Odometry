@@ -27,6 +27,10 @@ _PF_TO_NP = {
 }
 # Per-point sweep-time field names we know how to use, in priority order.
 _POINT_TIME_FIELDS = ("timeoffset", "t", "time", "timestamp")
+# Per-point return-strength field names, in priority order. `reflectivity` is
+# Ouster's calibrated, range-corrected return -> the most uniform for colouring;
+# `intensity`/`signal` are the raw signal photons; `ambient`/`near_ir` last.
+_INTENSITY_FIELDS = ("reflectivity", "intensity", "signal", "ambient", "near_ir")
 
 
 def read_points(msg, field_names):
@@ -64,17 +68,24 @@ def _normalize_point_times(t: np.ndarray) -> np.ndarray:
     return (t - t.min()) / spread
 
 
-def read_pointcloud2_scan(msg, normalize: bool = True):
-    """Read one PointCloud2 into `(points, point_times)`.
+def read_pointcloud2_scan(msg, normalize: bool = True, with_intensity: bool = False):
+    """Read one PointCloud2 into `(points, point_times)` (or `(points,
+    point_times, intensity)` when `with_intensity=True`).
 
     points: (N, 3) float64 in the sensor frame, NaN rows dropped.
     point_times: (N,) float64 from a `timeoffset`/t/time/timestamp field if
         present, else empty. With `normalize=True` scaled to [0, 1]; with
         `normalize=False` the raw values (e.g. Ouster `timeoffset` in ms).
+    intensity: (N,) float64 raw return strength from the first available field
+        in `_INTENSITY_FIELDS`, aligned with `points` (same NaN rows dropped),
+        else empty. Only returned when `with_intensity=True`.
     """
     field_names = {f.name for f in msg.fields}
     t_field = next((n for n in _POINT_TIME_FIELDS if n in field_names), None)
-    wanted = ["x", "y", "z"] + ([t_field] if t_field else [])
+    i_field = next((n for n in _INTENSITY_FIELDS if n in field_names), None) \
+        if with_intensity else None
+    wanted = ["x", "y", "z"] + ([t_field] if t_field else []) \
+        + ([i_field] if i_field else [])
 
     structured = read_points(msg, field_names=wanted)
     points = np.column_stack(
@@ -88,7 +99,14 @@ def read_pointcloud2_scan(msg, normalize: bool = True):
         point_times = _normalize_point_times(raw) if normalize else raw
     else:
         point_times = np.array([], dtype=np.float64)
-    return points, point_times
+
+    if not with_intensity:
+        return points, point_times
+    if i_field:
+        intensity = np.asarray(structured[i_field], dtype=np.float64)[keep]
+    else:
+        intensity = np.array([], dtype=np.float64)
+    return points, point_times, intensity
 
 
 def read_laz_scan(filepath: str):
@@ -152,10 +170,11 @@ class BagScanDataset:
     """
 
     def __init__(self, bag_dir: str, topic: str, deskewer=None, extrinsic=None,
-                 frame_start=0, frame_end=None):
+                 frame_start=0, frame_end=None, with_intensity=False):
         self.bag_dir = bag_dir
         self.topic = topic
         self.deskewer = deskewer
+        self.with_intensity = bool(with_intensity)
         self.extrinsic = None if extrinsic is None else np.asarray(extrinsic, dtype=np.float64)
         self.frame_start = int(frame_start or 0)
         self.frame_end = None if frame_end is None else int(frame_end)
@@ -185,14 +204,27 @@ class BagScanDataset:
                     break
                 msg = reader.deserialize(rawdata, connection.msgtype)
                 t_s = t_ns * 1e-9
+                wi = self.with_intensity
+                empty = np.array([], dtype=np.float64)
+                # Intensity is a per-point scalar; the extrinsic rotation and the
+                # attitude deskew both only rotate points (never reorder or drop
+                # them), so the intensity read here stays row-aligned with them.
                 if self.deskewer is not None:
-                    points, raw_t = read_pointcloud2_scan(msg, normalize=False)
+                    out = read_pointcloud2_scan(msg, normalize=False, with_intensity=wi)
+                    points, raw_t = out[0], out[1]
                     if self.extrinsic is not None:
                         points = points @ self.extrinsic.T
                     points = self.deskewer.deskew(points, raw_t / 1000.0, t_s)
-                    yield t_s, points, np.array([], dtype=np.float64)
+                    if wi:
+                        yield t_s, points, empty, out[2]
+                    else:
+                        yield t_s, points, empty
                 else:
-                    points, point_times = read_pointcloud2_scan(msg)
+                    out = read_pointcloud2_scan(msg, with_intensity=wi)
+                    points, point_times = out[0], out[1]
                     if self.extrinsic is not None:
                         points = points @ self.extrinsic.T
-                    yield t_s, points, point_times
+                    if wi:
+                        yield t_s, points, point_times, out[2]
+                    else:
+                        yield t_s, points, point_times

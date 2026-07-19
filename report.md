@@ -123,7 +123,7 @@ This folder contains high-accuracy global position data used as the absolute **r
 * **ROS Transform Tree:** Use `/tf_static` to calculate structural offsets, and `vehicle_odometry` to compute body-to-world state conversions.
 
 ### 5.2 Key Timestamp Windows (Unix Epoch Seconds)
-* **Test Run 1:** `1780397390.972` — `1780398213.329` (822s window)
+* **Test Run 1:** `1780397225.801` — `1780398045.801` (820s window)
 * **Test Run 2:** `1780398327.532` — `1780398929.389` (602s window)
 * **GNSS Reference Ground Truth:** `1780397225.802` — `1780398777.808` (Includes extended pre/post lock ranges)
 

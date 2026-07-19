@@ -41,12 +41,15 @@ L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
   {{maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}}).addTo(map);
 var g=L.polyline(gnss,{{color:'#1f77b4',weight:3,opacity:0.9}}).addTo(map);
 var o=L.polyline(odo,{{color:'#ff7f0e',weight:3,opacity:0.9}}).addTo(map);
-L.circleMarker(odo[0],{{radius:6,color:'#000',fillColor:'#000',fillOpacity:1}})
-  .addTo(map).bindPopup('start');
-L.circleMarker(odo[odo.length-1],{{radius:6,color:'#ff7f0e',fillColor:'#ff7f0e',
-  fillOpacity:1}}).addTo(map).bindPopup('odometry end');
+// Start markers are hollow rings, end markers are filled dots (same colour).
+L.circleMarker(gnss[0],{{radius:7,color:'#1f77b4',weight:3,fillColor:'#fff',
+  fillOpacity:1}}).addTo(map).bindPopup('GNSS start');
 L.circleMarker(gnss[gnss.length-1],{{radius:6,color:'#1f77b4',fillColor:'#1f77b4',
   fillOpacity:1}}).addTo(map).bindPopup('GNSS end');
+L.circleMarker(odo[0],{{radius:7,color:'#ff7f0e',weight:3,fillColor:'#fff',
+  fillOpacity:1}}).addTo(map).bindPopup('odometry start');
+L.circleMarker(odo[odo.length-1],{{radius:6,color:'#ff7f0e',fillColor:'#ff7f0e',
+  fillOpacity:1}}).addTo(map).bindPopup('odometry end');
 map.fitBounds(g.getBounds().extend(o.getBounds()), {{padding:[20,20]}});
 L.control.layers(null,{{'LiDAR odometry':o,'GNSS ground truth':g}},
   {{collapsed:false}}).addTo(map);

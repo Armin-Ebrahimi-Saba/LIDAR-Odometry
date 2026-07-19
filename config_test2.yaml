@@ -1,39 +1,35 @@
 paths:
-  # Folder containing metadata.yaml + rosbag_0.db3 (and rosbag_data/ alongside
-  # it). Per your tree, that's the rosbag/ folder directly -- NOT the
-  # "Location Person GNSS" subfolder, which is a separate, unrelated GNSS
-  # export (not used by this pipeline; ground truth comes from
-  # xtrack_gnss_corrected/ instead).
-  bag_dir: "./data/rosbag"
+  # Test2 rosbag (separate recording from Test1's ./data/rosbag).
+  bag_dir: "./test2/rosbag"
 
   # Folder containing the individual cloud_##########.laz files
-  laz_dir: "./data/rosbag/rosbag_data/laz_clouds"
+  laz_dir: "./test2/rosbag/rosbag_data/laz_clouds"
 
-  # Corrected GNSS reference trajectory (ground truth)
+  # Corrected GNSS reference trajectory (ground truth). ONE file covers both
+  # datasets; it is cropped to the run window below. Note this file ends at
+  # ~1780398777.8, i.e. it only covers roughly the first ~450 s of the Test2
+  # window, so evaluation is against that portion of the run.
   gnss_csv: "./data/xtrack_gnss_corrected/xtrack_global_position_t12.csv"
 
   # Where all pipeline outputs for this run get written
-  output_dir: "./outputs/test1"
+  output_dir: "./outputs/test2"
 
 run:
-  name: "Test1"
+  name: "Test2"
   lidar_topic: "/ouster/points"
-  # Run time window in Unix epoch seconds. Test1 is defined here as the FIRST
-  # 820 s of the GNSS file (first sample 1780397225.801 + 820 s). The LiDAR
-  # stream (/ouster/points) only starts at 1780397393.674, ~168 s into this
-  # window, so the extra leading GNSS rows simply have no LiDAR match.
+  # Test2 window (bag starts 1780398327.531873, duration 601.8 s).
   #   Inventory-report windows (for reference):
   #     Test1: 1780397390.972 -> 1780398213.329
   #     Test2: 1780398327.532 -> 1780398929.389
-  start_time: 1780397225.801
-  end_time: 1780397940.801
+  start_time: 1780398100.801
+  end_time: 1780398520.389
   # Closed range of scan indices to process (frame_end inclusive; null = until
-  # the last scan). Test1 has 8,194 scans. Overridden by `--frames START END`.
+  # the last scan). Test2 has 6,008 scans. Overridden by `--frames START END`.
   frame_start: 0
   frame_end: null
   # Legacy: first-N-scans cap, used only when frame_end is null
   # (frame_end = frame_start + max_frames - 1). Prefer frame_start/frame_end.
-  max_frames: 8194 # max:  8,194-frame
+  max_frames: 6008
 
 lidar:
   # Where odometry reads scans from:
@@ -100,11 +96,28 @@ ground_truth:
                                   # edge jumps in the error plot after the basic crop
 
 alignment:
-  # The odometry is georeferenced onto the GNSS ENU frame with a global
-  # least-squares (Umeyama) rigid fit: rotation + translation, scale fixed to 1.
+  # How the odometry is georeferenced onto the GNSS ENU frame:
+  #   "umeyama"           -- global least-squares rigid fit (R + t from best-
+  #                          fitting the whole matched track; scale fixed to 1).
+  #   "attitude_anchored" -- deterministic: the start point comes from the GNSS
+  #                          ground truth and the heading (N/E/S/W) from the
+  #                          measured PX4 attitude (/fmu/out/vehicle_attitude) at
+  #                          the first scan. No fit to the GT track, so the error
+  #                          curve reflects pure odometry drift from a known start.
+  #   "anchored"          -- pin the start to the first GT row and fit ONLY the
+  #                          rotation about it (starts coincide exactly).
   method: "anchored"
-  max_time_diff_s: 0.15   # max gap allowed when matching a SLAM pose to its nearest GT sample
+  # How SLAM poses are matched to GT samples in time:
+  #   "absolute"     -- nearest shared-clock timestamp within max_time_diff_s.
+  #   "proportional" -- clocks don't share an epoch; runs correspond end-to-end
+  #                     (first scan <-> first GT row, last <-> last). Scan times
+  #                     are remapped onto the GT span by run fraction, then matched.
+  #   "arclength"    -- like proportional, but match by fraction of distance
+  #                     travelled, not time. Robust when the LiDAR dwells at the
+  #                     start longer than the GT window does (the stationary head
+  #                     otherwise pairs parked scans with GT that already moved).
   time_match: "arclength"
+  max_time_diff_s: 0.10   # (absolute mode only) max gap allowed when matching
   # Weight matched pairs by the GNSS solution's own uncertainty when fitting the
   # georeference and computing RMSE: weight = 1 / max(eph, eph_floor_m)^2, using
   # PX4's per-sample horizontal error `eph` (m, 1-sigma) from the ground-truth
@@ -121,5 +134,5 @@ velocity:
   smooth_polyorder: 2
 
 evaluation:
-  plot_title: "Test1 -- LiDAR Odometry vs GNSS Ground Truth"
+  plot_title: "Test2 -- LiDAR Odometry vs GNSS Ground Truth"
   time_tick_s: 100   # put a time marker on the trajectory plot every N seconds (0 = off)

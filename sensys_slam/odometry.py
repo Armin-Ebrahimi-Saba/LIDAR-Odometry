@@ -85,22 +85,31 @@ def run_odometry(dataset, cfg: dict, output_dir: str, initial_pose=None) -> pd.D
         raise RuntimeError("Dataset is empty -- nothing to process.")
 
     # The package's local_map is pruned to max_range around the current pose, so
-    # it is not the full trajectory map. Accumulate the registered downsample of
-    # every frame into our own global map, compacting periodically with a voxel
-    # filter to bound memory (low-res is fine for the deliverable).
-    voxel = config.mapping.voxel_size
+    # it is not the full trajectory map. Accumulate every frame into our own
+    # global map, compacting periodically with a voxel filter to bound memory.
+    #
+    # `map_voxel_size` is deliberately decoupled from `voxel_size`: the latter
+    # drives registration and KISS-ICP's local map (an odometry tuning knob),
+    # while this one only sets the resolution of the map deliverable. One point
+    # survives per `map_voxel` cell, so it is the hard ceiling on map density.
+    mapping_cfg = cfg.get("kiss_icp", {}).get("mapping", {})
+    map_voxel = float(mapping_cfg.get("map_voxel_size")
+                      or config.mapping.voxel_size)
     global_map = o3d.geometry.PointCloud()
     pending = []
+
+    def _voxel_down(points, voxel):
+        pc = o3d.geometry.PointCloud()
+        pc.points = o3d.utility.Vector3dVector(points)
+        return pc.voxel_down_sample(voxel)
 
     def _compact():
         nonlocal pending
         if not pending:
             return
-        buf = o3d.geometry.PointCloud()
-        buf.points = o3d.utility.Vector3dVector(np.vstack(pending))
-        global_map.points.extend(buf.points)
-        ds = global_map.voxel_down_sample(voxel)
-        global_map.points = ds.points
+        global_map.points.extend(
+            o3d.utility.Vector3dVector(np.vstack(pending)))
+        global_map.points = global_map.voxel_down_sample(map_voxel).points
         pending = []
 
     records = []
@@ -109,7 +118,10 @@ def run_odometry(dataset, cfg: dict, output_dir: str, initial_pose=None) -> pd.D
         # kiss-icp expects per-point timestamps for deskew; pass through (empty
         # array when deskew is off / clouds are already motion-compensated).
         ts = np.asarray(point_times, dtype=float)
-        _, source = engine.register_frame(frame, ts)
+        # register_frame returns (deskewed raw scan, registration downsample).
+        # Map the raw scan: the registration cloud is voxelized at 1.5x
+        # voxel_size, which would cap map density well below map_voxel_size.
+        scan, _ = engine.register_frame(frame, ts)
         pose = engine.last_pose
         t = pose[:3, 3]
         q = Rotation.from_matrix(pose[:3, :3]).as_quat()  # [x, y, z, w]
@@ -119,10 +131,12 @@ def run_odometry(dataset, cfg: dict, output_dir: str, initial_pose=None) -> pd.D
             "qx": q[0], "qy": q[1], "qz": q[2], "qw": q[3],
         })
 
-        # source is in the sensor frame; map it to the world frame for the map.
-        if source is not None and len(source):
-            world = (pose[:3, :3] @ np.asarray(source).T).T + t
-            pending.append(world)
+        # scan is in the sensor frame; map it to the world frame for the map.
+        # Thin each scan to the map resolution before buffering -- the raw sweep
+        # is ~36k points, and anything finer than map_voxel is dropped anyway.
+        if scan is not None and len(scan):
+            world = (pose[:3, :3] @ np.asarray(scan).T).T + t
+            pending.append(np.asarray(_voxel_down(world, map_voxel).points))
         if len(pending) >= 100:
             _compact()
 

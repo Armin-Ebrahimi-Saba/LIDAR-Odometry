@@ -14,7 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from .geo import geodetic_to_enu
-from .align import nearest_time_match, match_weights
+from .align import match_poses_to_gt, match_weights
 
 
 def evaluate_against_ground_truth(traj_latlon_df, gt_df, ref_origin, cfg, output_dir) -> dict:
@@ -22,9 +22,7 @@ def evaluate_against_ground_truth(traj_latlon_df, gt_df, ref_origin, cfg, output
     gt_enu = geodetic_to_enu(gt_df["lat"].values, gt_df["lon"].values,
                              gt_df["alt"].values, lat0, lon0, alt0)
 
-    max_diff = cfg.get("alignment", {}).get("max_time_diff_s", 0.15)
-    q_idx, r_idx = nearest_time_match(traj_latlon_df["timestamp"].values,
-                                      gt_df["timestamp"].values, max_diff)
+    q_idx, r_idx = match_poses_to_gt(traj_latlon_df, gt_df, cfg)
     if len(q_idx) == 0:
         raise RuntimeError("No timestamp matches for evaluation -- check windows/epochs.")
 

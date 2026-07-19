@@ -35,9 +35,10 @@ python run_pipeline.py --config config.yaml              # all stages in order
 python run_pipeline.py --config config.yaml --stage odometry   # a single stage
 ```
 
-Valid stages: `timestamps`, `odometry`, `align`, `velocity`, `evaluate`. They are
-sequential — each stage reads the previous stage's output from `paths.output_dir`,
-so a stage can be re-run alone as long as its inputs already exist. With
+Valid stages: `timestamps`, `odometry`, `align`, `velocity`, `evaluate`, `map`,
+`map3d`, `colormaps`. They are sequential — each stage reads the previous stage's
+output from `paths.output_dir`, so a stage can be re-run alone as long as its
+inputs already exist (`--stage X` runs `X` and every stage after it). With
 `lidar.source: bag` the `timestamps` stage is optional (it only builds the `.laz`
 manifest needed by `lidar.source: laz`).
 
@@ -50,19 +51,24 @@ still honoured when `frame_end` is null. Test1 has **8,194** scans (Test2:
 ## Pipeline stages
 
 ```
-bag / .laz ─▶ timestamps ─▶ odometry ─▶ align ─▶ velocity ─▶ evaluate
-                            (KISS-ICP)   (georef)  (NED)      (RMSE + plot)
+bag / .laz ─▶ timestamps ─▶ odometry ─▶ align ─▶ velocity ─▶ evaluate ─▶ map ─▶ map3d ─▶ colormaps
+                            (KISS-ICP)   (georef)  (NED)      (RMSE)     (OSM)  (3D)    (coloured maps)
 ```
 
 1. **timestamps** — pair each `.laz` scan with its bag-recorded timestamp
    → `scan_manifest.csv` (only needed for `lidar.source: laz`).
 2. **odometry** — run the KISS-ICP package over the scans, seeded at
    the first GNSS ground-truth point → `poses_local.csv`, `map_local.pcd`.
-3. **align** — start-anchored SE(3) georeference of the trajectory to GNSS ENU,
-   re-expressed as lat/lon → `trajectory_latlon.csv`, `alignment_origin.yaml`.
+3. **align** — global least-squares (Umeyama) SE(3) georeference of the trajectory
+   to GNSS ENU, re-expressed as lat/lon → `trajectory_latlon.csv`, `alignment_origin.yaml`.
 4. **velocity** — smoothed finite-difference of the trajectory → `velocity_ned.csv`.
 5. **evaluate** — re-match to GNSS, compute RMSE/mean/max error, plot trajectory +
    error-over-time → `error_evaluation.png`, `error_metrics.csv`.
+6. **map** — render odometry + GNSS on an OpenStreetMap basemap → `trajectory_map.html`.
+7. **map3d** — render the accumulated 3D point cloud interactively → `map_3d.html`.
+8. **colormaps** — colour the 3D map by elevation (`map_local_height.pcd`, an
+   instant post-process of `map_local.pcd`) and by the LiDAR's per-point return
+   (`map_local_intensity.pcd`, which re-reads the bag) → both `.pcd` files.
 
 All outputs land in `paths.output_dir` (default `outputs/test1/`).
 
@@ -76,10 +82,49 @@ All outputs land in `paths.output_dir` (default `outputs/test1/`).
 | `groundtruth.py` | Load `xtrack_global_position_t12.csv`, crop to the run window on `timestamp_sample`, drop invalid rows. |
 | `geo.py` | WGS84 ↔ local ENU conversions (via `pymap3d`). |
 | `frames.py` | Body-frame definition. `build_lidar_to_body` returns the LiDAR→Pixhawk-FRD rotation used to express scans in the body frame (`lidar.body_frame`). |
-| `align.py` | `anchored_alignment` (pin the start to the first GT point, fit rotation about it — error 0 at t=0), `umeyama_alignment` (global best-fit alternative), `nearest_time_match`, `align_and_georeference`. |
+| `align.py` | `umeyama_alignment` (global least-squares SE(3) best fit, scale fixed to 1, optionally eph-weighted), `nearest_time_match` (time-pair SLAM poses to GT samples), `match_weights` (1/eph² inverse-variance weights), `align_and_georeference` (drives the full georeference). |
 | `velocity.py` | `compute_ned_velocity` — Savitzky-Golay-smoothed finite differences of ENU position → NED velocity. |
 | `evaluate.py` | `evaluate_against_ground_truth` — RMSE/mean/max vs GNSS, trajectory + error plot. |
 | `attitude.py` | **Optional** (`lidar.imu_deskew`). `AttitudeDeskewer`/`load_attitude_deskewer` — reads `/fmu/out/vehicle_attitude`, SLERP-interpolates, and rotation-deskews each sweep to the orientation at the sweep end. Replaces only the *rotational* part of KISS-ICP's constant-velocity deskew; off by default. |
+
+## Alignment: georeferencing the trajectory to GNSS
+
+KISS-ICP produces poses in a *local* world frame — metric, but with an arbitrary
+initial heading and origin. The `align` stage (`sensys_slam/align.py`,
+`align_and_georeference`) ties that track to absolute coordinates by fitting **one
+rigid SE(3) transform** onto the GNSS ENU frame. It is a **global least-squares
+(Umeyama) best fit, not a start-anchored one**: every matched sample contributes,
+so the residual is spread across the whole run rather than forced to zero at the
+start. (This is why the stationary start still shows tens of metres of error in
+the Results below — a start-anchored fit would instead pin `t = 0` to ~0.)
+
+Steps:
+
+1. **GNSS → ENU.** Ground-truth lat/lon/alt is converted to local ENU metres
+   (`geo.py`) about a tangent origin `ref_origin` — the run's first GT sample,
+   the same point the odometry was seeded at, so the odometry world frame already
+   starts at ENU ≈ (0, 0, 0). The origin is stored in `alignment_origin.yaml`.
+2. **Time-match.** Each SLAM pose is paired with its nearest-in-time GT sample by
+   binary search (`nearest_time_match`); any pair separated by more than
+   `alignment.max_time_diff_s` (0.15 s) is dropped.
+3. **Inverse-variance weights.** Each pair is weighted by
+   `1 / max(eph, eph_floor)²` from PX4's own horizontal uncertainty `eph`
+   (`alignment.eph_weighting`, `eph_floor_m = 0.3`). This down-weights the
+   several-metre GNSS wander during EKF initialisation so it can't dominate the fit.
+4. **Umeyama SE(3).** Weighted centroids → weighted cross-covariance → SVD yields
+   the rotation `R` (with a determinant-sign guard against reflections) and the
+   translation `t = μ_dst − R·μ_src`. **Scale is fixed to 1** — the fit is rigid
+   and metric-preserving, because LiDAR odometry is already metric; only the
+   arbitrary heading and origin need correcting.
+5. **Apply & re-project.** `R, t` are applied to the *entire* trajectory, which is
+   converted back to lat/lon (`enu_to_geodetic`) → `trajectory_latlon.csv`. The
+   reported fit RMSE is the eph-weighted residual — the exact quantity minimised.
+
+Because the fit is global *and* rigid (no per-segment warping, no scale freedom),
+it cannot mask odometry drift: fitting one part of the run well necessarily leaves
+large residuals wherever the odometry has drifted. That is what makes the
+error-over-time curve a fair picture of the odometry rather than an artefact of
+the alignment.
 
 ## Coordinate frames
 
@@ -96,13 +141,62 @@ Enable with `lidar.body_frame: true`; override the rotation with
 Only rotation is modelled; the lever-arm translation is unknown and assumed zero.
 
 > **Empirical caveat (this bag).** For *pure* LiDAR odometry the body-frame
-> rotation is a constant and is absorbed by the start-anchored alignment (RMSE
+> rotation is a constant and is absorbed by the global least-squares alignment (RMSE
 > unchanged, ±0.03 m). It only has a real effect when combined with the PX4
 > attitude — and there the default FLU→FRD guess **does not help**: it makes the
 > attitude-deskew worse on Test1 (RMSE 3.08 m vs 2.01 m without it). That means
 > the true Ouster↔Pixhawk extrinsic differs from the convention flip and would
 > need calibration before LiDAR+attitude fusion is trustworthy. Until then, keep
 > `imu_deskew` off (or supply a calibrated `extrinsic_rpy_deg`).
+
+## How the IMU / attitude is used
+
+The IMU contributes to exactly **one** thing in this pipeline — motion-compensating
+(deskewing) each LiDAR sweep — and nothing else. It does **not** feed the pose
+estimate, the heading, or the velocity. Those come entirely from KISS-ICP's
+scan-to-map registration.
+
+**Mechanism** (`sensys_slam/attitude.py`, enabled by `lidar.imu_deskew`):
+
+- The Ouster spins over ~100 ms per sweep, so points captured early vs. late in
+  the sweep are seen from different orientations; on a rotating platform that
+  smears the cloud.
+- For each sweep `AttitudeDeskewer.deskew` takes the per-point sweep times
+  (`timeoffset`), **SLERP-interpolates the measured attitude** to each point's
+  timestamp, and rotates every point to the orientation at the *sweep end*.
+- This **replaces only the rotational part** of KISS-ICP's own deskew. KISS-ICP
+  normally assumes the platform keeps rotating at the rate implied by the last
+  two scans (constant velocity); with `imu_deskew` on we use the *actually
+  measured* rotation instead, and `kiss_icp.data.deskew` is forced off
+  (`run_pipeline.py`). Translation within the sweep is not compensated
+  (negligible here at ~0.08 m/sweep), and the LiDAR↔FCU extrinsic is assumed
+  identity (a single-sweep rotation is small, so the residual is second order).
+
+**Which data source, and why** — the choice was verified against *this* bag, not
+assumed:
+
+| Source (topic) | Rate | In pipeline? | How / why |
+|---|---|---|---|
+| `/fmu/out/vehicle_attitude` (PX4 EKF fused attitude, body-FRD→NED quaternion) | ~100 Hz | ✅ **the only IMU input** | Drives the deskew. Chosen because it is the real fused attitude: unit-norm, and its **yaw tracks the GNSS course** over the run. px4_msgs is not registered in the bag, so the quaternion is read straight from the CDR payload (`float32[4]` at byte offset 20, PX4 `[w,x,y,z]`) — reverse-engineered and validated before use. |
+| `/ouster/imu_att` | — | ❌ rejected | **All-identity for the entire recording** — dead/unusable. This is the "obvious" LiDAR-attitude source and it is broken, which is exactly why the PX4 stream is used instead. |
+| `/ouster/imu_meas` (raw Ouster accel + gyro) | 100 Hz | ⚠️ diagnostic only | Used by `scripts/imu_pure_speed.py` for a pure-inertial strapdown speed check — not by the odometry. |
+| `/fmu/out/vehicle_local_position` / `vehicle_odometry` (PX4 EKF velocity, IMU-propagated) | — | ⚠️ diagnostic only | Used by `scripts/imu_speed.py` to report EKF speed at a frame — not by the odometry. |
+
+To make the attitude apply cleanly the scans are first rotated into the **Pixhawk
+FRD body frame** (`lidar.body_frame`, see "Coordinate frames"), so they share the
+PX4 attitude's convention.
+
+> **Where this leaves accuracy.** At this platform's crawl speed the within-sweep
+> rotation is small, so deskew is a second-order cleanup — it sharpens each cloud
+> but does **not** bound the trajectory drift. The single most valuable fact —
+> that `vehicle_attitude`'s yaw already tracks the GNSS course — is currently
+> spent only on deskewing, *not* fused into the pose/heading. Wiring that
+> attitude (or GNSS) into the pose solution, rather than just the sweep
+> correction, is the natural next step against the heading-driven drift reported
+> below. (See also the empirical caveat under "Coordinate frames": with the
+> uncalibrated FLU→FRD extrinsic guess, `imu_deskew` currently makes Test1
+> *slightly worse* — 3.08 m vs 2.01 m on the moving segment — so it is off by
+> default until the true extrinsic is calibrated.)
 
 ## Known limitation: the stationary start
 
@@ -119,6 +213,57 @@ Tuning (voxel size, range, adaptive threshold) does **not** help here; the data
 simply contains no motion. The honest options are to start the run window after
 the platform begins moving, or to add a zero-velocity / external-prior step for
 the stationary segment.
+
+## Results — accuracy, and why KISS-ICP is not good enough here
+
+Test1 (`outputs/test1/error_metrics.csv`, over 6,519 GNSS-matched samples):
+
+| RMSE | eph-weighted RMSE | mean | max | GNSS `eph` (median / max) |
+|---|---|---|---|---|
+| **52.46 m** | 47.94 m | 46.75 m | **118.42 m** | 0.55 m / 3.44 m |
+
+On a ~573 m out-and-back that is ~9 % of the path RMSE and ~21 % at worst — far
+from usable. The `error_evaluation.png` error-over-time curve (right panel) tells
+the story better than the aggregate:
+
+- **t = 0–110 s — pinned at ~65–80 m, but not KISS-ICP's fault.** The platform is
+  stationary (see "the stationary start"); consecutive scans are identical, so
+  odometry correctly stays put while the GNSS EKF is still settling. This segment
+  inflates the raw RMSE and is exactly what the eph-weighting discounts.
+- **KISS-ICP *can* track locally.** Once motion begins the error collapses to
+  ~10 m at **t ≈ 160 s** and again at **t ≈ 390 s**, and to just **~1–3 m at
+  t ≈ 520 s** (the platform is back near the start — a near-loop-closure landing
+  in the well-fit origin region of the global alignment). Scan-to-map registration is working
+  frame-to-frame.
+- **But drift is unbounded, and it runs away on the final leg.** From
+  **t ≈ 525 s the error balloons from ~2 m to its 118 m maximum at t ≈ 655 s**
+  (end of run) — a monotonic blow-up over the last ~130 s with nothing to arrest
+  it. Earlier the same mechanism produces the intermediate peaks (**~72 m at
+  t ≈ 310 s**, **~51 m at t ≈ 435 s**): the error is essentially *accumulated
+  heading error × distance-from-anchor*, so it shrinks whenever the platform
+  passes near the start/turnaround and grows as it moves away. That oscillation
+  is the fingerprint of pure dead-reckoning, not measurement noise.
+
+**Why it happens.** KISS-ICP here is pure scan-to-map dead-reckoning with **no
+absolute reference** — no GNSS fusion, no IMU-heading fusion, no loop closure. Two
+dataset properties make that fatal:
+
+1. **Geometric degeneracy.** The route is a narrow corridor (~223 m × 96 m,
+   ~8:1 aspect) and `max_range` is 20 m, so along-track structure is starved —
+   the very direction that constrains heading. A small per-scan yaw error is
+   unobservable locally and integrates into the large end-of-run offset seen
+   above. The trajectory panel shows the symptom: the orange odometry collapses
+   the wide GNSS loop onto a nearly straight line.
+2. **A starved motion model.** Median speed is ~0.82 m/s (max ~1.96 m/s, ~7 cm per
+   scan); ~62 % of scans move less than `min_motion_th` (0.1 m) and ~38 % are
+   essentially still (<2 cm). KISS-ICP's constant-velocity prediction and adaptive
+   threshold have almost no signal to work with, so registration leans hardest on
+   the weakly-constrained corridor geometry precisely when it is least reliable.
+
+The fix is **not** more KISS-ICP tuning (voxel/range/threshold do not create the
+missing constraint) but adding an absolute reference — fuse the GNSS, or the PX4
+attitude whose yaw already tracks the GNSS course (see "How the IMU / attitude is
+used"), into the pose estimate, and/or close the loop at the start/turnaround.
 
 ## Utility scripts (`scripts/`)
 
@@ -158,3 +303,42 @@ Key fields in `config.yaml`:
   package's constant-velocity deskew (needs `lidar.source: bag`).
 - `evaluation.time_tick_s` — on `error_evaluation.png`, both trajectories are
   coloured by time and get a labelled marker every N seconds (`0` = off).
+
+## Outputs / deliverables
+
+A full run writes these to `paths.output_dir` (default
+[`outputs/test1/`](outputs/test1/)). The three items required by
+[`DESCRIPTION.md`](DESCRIPTION.md) — trajectory + velocity, a 3D point-cloud map,
+and an error plot vs. GNSS — map onto the files below.
+
+**Task-3 deliverables**
+
+| Requirement (`DESCRIPTION.md`) | File |
+|---|---|
+| 2D trajectory (LatLon) | [`outputs/test1/trajectory_latlon.csv`](outputs/test1/trajectory_latlon.csv) |
+| Velocity (NED frame) | [`outputs/test1/velocity_ned.csv`](outputs/test1/velocity_ned.csv) |
+| Trajectory + velocity, combined | [`outputs/test1/trajectory_latlon_with_velocity.csv`](outputs/test1/trajectory_latlon_with_velocity.csv) |
+| 3D point-cloud map (`.pcd`) | [`outputs/test1/map_local.pcd`](outputs/test1/map_local.pcd) |
+| Error plot: estimate vs GNSS (RMSE) | [`outputs/test1/error_evaluation.png`](outputs/test1/error_evaluation.png) |
+| Error metrics (RMSE / mean / max) | [`outputs/test1/error_metrics.csv`](outputs/test1/error_metrics.csv) |
+
+**Point-cloud maps** (same 3D geometry, different per-point colour)
+
+| File | Colour | Built by |
+|---|---|---|
+| [`outputs/test1/map_local.pcd`](outputs/test1/map_local.pcd) | none (XYZ only) | `odometry` stage |
+| [`outputs/test1/map_local_height.pcd`](outputs/test1/map_local_height.pcd) | by elevation (Z), `turbo` | `colormaps` stage (instant post-process) |
+| [`outputs/test1/map_local_intensity.pcd`](outputs/test1/map_local_intensity.pcd) | by LiDAR return strength | `colormaps` stage (re-reads the bag) |
+
+View any of them with:
+
+```bash
+python -c "import open3d as o3d; o3d.visualization.draw_geometries([o3d.io.read_point_cloud('outputs/test1/map_local_intensity.pcd')])"
+```
+
+**Interactive HTML views**
+
+| File | Contents |
+|---|---|
+| [`outputs/test1/trajectory_map.html`](outputs/test1/trajectory_map.html) | odometry vs GNSS on an OpenStreetMap basemap |
+| [`outputs/test1/map_3d.html`](outputs/test1/map_3d.html) | the accumulated 3D point-cloud map, interactive |

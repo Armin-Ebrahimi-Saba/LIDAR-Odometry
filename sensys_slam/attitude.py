@@ -78,16 +78,6 @@ def load_attitude_deskewer(bag_dir: str, topic: str = PX4_ATTITUDE_TOPIC):
     times, rots = _read_attitude(bag_dir, topic)
     return AttitudeDeskewer(times, rots)
 
-
-def attitude_rotation_at(bag_dir: str, t_query: float, topic: str = PX4_ATTITUDE_TOPIC):
-    """SLERP-interpolated body(FRD)->NED rotation at bag time `t_query` (clamped
-    to the attitude stream's span). Used to seed the georeference orientation
-    from measured attitude instead of fitting it to GNSS."""
-    times, rots = _read_attitude(bag_dir, topic)
-    tq = float(np.clip(t_query, times[0], times[-1]))
-    return Slerp(times, rots)([tq])[0]
-
-
 class AttitudeDeskewer:
     """Rotates each point of a sweep to the orientation at the sweep end,
     using SLERP-interpolated measured attitude."""
