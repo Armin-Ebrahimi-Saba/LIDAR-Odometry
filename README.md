@@ -1,6 +1,7 @@
-# LIO-SAM 6AXIS Setup and Reproducibility Documentation
+# Sensor System Report: Application of LIO-SAM 6AXIS
 
-This documentation describes how the Ouster OS0-32 LiDAR and its internal IMU can be used to generate a consistent map (Point Cloud Map) using LIO-SAM 6AXIS.
+
+
 
 ## 1. Overview of Files and Scripts
 
