@@ -1,6 +1,6 @@
 # Sensor System Report: Application of LIO-SAM 6AXIS
 <video
-src= "https://github.com/Armin-Ebrahimi-Saba/LIDAR-based-Positioning/raw/LIO_SAM_6AXIS/results/videos/LIO_SAM_6AXIS_without_GNSS_Test1_edited.mp4"
+src="./results/videos/LIO_SAM_6AXIS_without_GNSS_Test1_edited.mp4"
 loop autoplay muted controls></video>
 
 
