@@ -12,11 +12,17 @@ loop autoplay muted controls></video>
 
 ### 1.1 Branch Structure
 The repository is organized into the following key directories to maintain a clean separation of concerns:
-*   `bag_preparation/`: Contains Python scripts used to convert and synchronize raw ROS 2 data bags into a format readable by our SLAM core.
-*   `config/` & `src/`: Core configuration files and patched C++ source files for the LIO-SAM 6AXIS algorithm.
-*   `bags/` & `data/`: Data storage directories containing the input rosbags and Ground Truth JSON/CSV files.
-*   `scripts/`: Python scripts for evaluating and visualizing the final trajectories (e.g., Plotly comparisons).
-*   `output/` (incl. `maps/`): Destination folders for generated 3D `.pcd` point clouds and optimized trajectory logs.
+
+```text
+.
+├── bag_preparation/      <- Scripts to convert and synchronize raw ROS 2 bags
+├── bags/                 <- Data storage for pre-processed, SLAM-ready rosbags
+├── config/               <- Core configuration files for the LIO-SAM 6AXIS algorithm
+├── data/                 <- Storage for Ground Truth JSON/CSV files
+├── output/               <- Destination for 3D .pcd maps and optimized trajectory logs
+├── scripts/              <- Evaluation and visualization scripts (e.g., Plotly comparisons)
+└── src/                  <- Patched C++ source files for LIO-SAM 6AXIS
+```
 
 ### 1.2 Data Pre-Processing
 The core data for this module is provided as **Test 1**, recorded by an XTrack vehicle platform. Crucially, the raw data is provided as a **ROS 2 Bagfile**, while LIO-SAM 6AXIS requires **ROS 1 Melodic** to function. Furthermore, the raw sensor messages are published in hardware-specific ROS 2 message types that standard SLAM nodes cannot interpret directly.
