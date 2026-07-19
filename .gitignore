@@ -1,12 +1,27 @@
-# Rosbags
+# Data and Bags
+bags/
+data/
 *.db3
-rosbag/
-rosbag_new/
 *.bag
+*.bag.bak
 
-# Maps
+# Outputs and Results
+output/
+results/
 maps/
 *.pcd
 
-bags/*
-output/
+# Unused configurations
+config/
+
+# Ignore all scripts except those required for LIO-SAM execution
+scripts/*
+!scripts/run_lio_sam.sh
+!scripts/run_lio_sam_gnss.sh
+!scripts/patch_yaml.py
+
+# Python environments / cache
+__pycache__/
+*.pyc
+.env
+venv/

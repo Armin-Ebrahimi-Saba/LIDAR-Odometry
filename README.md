@@ -33,7 +33,7 @@ The system specifically targets three raw data streams:
 | Sensor Source | Original ROS 2 Topic | Original Message Type | Required LIO-SAM Topic | Required Message Type |
 | :--- | :--- | :--- | :--- | :--- |
 | **LiDAR** | `/ouster/points` | `sensor_msgs/PointCloud2` | `/os_cloud_node/points` | `sensor_msgs/PointCloud2` |
-| **IMU** | `/ouster/imu_meas` | Ouster-specific Message | `/stim300/imu/data_raw` | `sensor_msgs/Imu` |
+| **IMU** | `/ouster/imu_meas` | `aspn_msgs/MeasurementIMU` | `/stim300/imu/data_raw` | `sensor_msgs/Imu` |
 | **GNSS/GPS** | `/fmu/out/vehicle_gps_position` | `px4_msgs/SensorGps` | `/gps/fix` | `sensor_msgs/NavSatFix` |
 
 To bridge the gap between the raw ROS 2 inputs and the ROS 1 LIO-SAM requirements, the `bag_preparation` directory contains two vital scripts:
