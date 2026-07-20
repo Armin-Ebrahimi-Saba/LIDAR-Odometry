@@ -102,6 +102,8 @@ Wir haben gezielte C++ Patches tief in die Architektur von LIO-SAM injiziert, um
 
 The final evaluation was conducted using custom Python scripts (`plot_comparison.py`) running entirely outside of ROS, relying on standard libraries to compare the drifting trajectories against the high-accuracy Ground Truth. *(Note: The raw data, outputs, and evaluation scripts have been omitted from this slimmed-down repository delivery).*
 
+<img width="4811" height="2966" alt="my_comparison" src="https://github.com/user-attachments/assets/4b1a37b1-c5e9-4614-8e5b-6755b14247e7" />
+
 ### 3.1 Evaluation Pipeline
 1. `extract_origin.py` reads the initial reference angle (Yaw) and the starting LLA coordinates.
 2. `plot_comparison.py` maps the local Cartesian LiDAR frames back to WGS84 global coordinates.
