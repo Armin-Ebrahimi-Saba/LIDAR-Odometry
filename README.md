@@ -276,11 +276,6 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
 3. **Oscillating error over time**: consistent with locally losing/regaining 
    constraint through the route rather than one systemic bias.
 
-GLIM's own internal short-horizon IMU-prediction checks report
-centimeter-to-decimeter consistency throughout. Odometry is locally sound,
-but outbound-leg drift exceeds what the return leg's point-cloud overlap can
-correct via global loop closure.
-
 ## Why results may be worse than LIO-SAM / KISS-ICP
 
 Plausible contributing factors based on architectural differences:
