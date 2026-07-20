@@ -61,6 +61,36 @@ flowchart TD
 *   **`docker-compose.yml`**: Creates an isolated `lio_sam_6axis` environment.
 *   **`patch_yaml.py`**: Insertes variables and noise tolerances directly into the LIO-SAM parameter files before execution.
 *   **`run_lio_sam.sh` & `run_lio_sam_gnss.sh`**: Orchestrates the time-synchronized playback, remaps the topics from the ROS 2 bag to the ROS 1 node names (as shown in the table above), and triggers auto-saving of the results after completion.
+*   **`format_slam_output.py`**: A post-processing script called automatically by the launch scripts. It reads the raw LIO-SAM outputs, converts the local trajectory into global Latitude/Longitude, computes NED velocities, and creates a clean `SLAM_path.csv` alongside the renamed `map3d.pcd` point cloud.
+
+### 1.4 Run guide
+Follow these steps to run the SLAM pipeline on your machine:
+
+1. **Prepare the Data**: Start by placing your raw ROS 2 bag folder/files into the `bags/` directory. Then, run the pre-processing scripts from the `bag_preparation/` folder to convert the ROS 2 messages to ROS 1 and synchronize the Ouster timestamps.
+   ```text
+   .
+   ├── bags/
+   │   └── <your_raw_ros2_bag>   <- Place your raw ROS 2 data here
+   ```
+   Execute the conversion and synchronization:
+   ```bash
+   python3 bag_preparation/convert_bag.py
+   python3 bag_preparation/fix_ouster_bag.py
+   ```
+   This will output a final, synchronized ROS 1 bag named `lio_sam_ready.bag` inside your `bags/` directory.
+2. **Start the SLAM Node**: Depending on whether you want to use GNSS fusion, execute one of the launch scripts from your terminal:
+   - For LiDAR + IMU only:
+     ```bash
+     bash scripts/run_lio_sam.sh
+     ```
+   - For LiDAR + IMU + GNSS:
+     ```bash
+     bash scripts/run_lio_sam_gnss.sh
+     ```
+3. **Wait for Completion**: The script will launch a Docker container, configure LIO-SAM dynamically, play the bag file, and process the data. 
+4. **Output Generation**: Once finished, the pipeline automatically processes the results and saves them in the `output/maps/` directory. You will find exactly two files for each run:
+   - `map3d.pcd`: The generated 3D point cloud map.
+   - `SLAM_path.csv`: The converted 2D trajectory (Lat/Lon) and velocity data.
 
 ---
 

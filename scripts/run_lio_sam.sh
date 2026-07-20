@@ -38,6 +38,13 @@ rosservice call /lio_sam_6axis/save_map
 mkdir -p /workspace/output/maps/
 cp -r /root/workspace/src/LIO_SAM_6AXIS/LIO-SAM-6AXIS/data/* /workspace/output/maps/ || true
 
+echo "Formatting output maps and generating SLAM_path.csv..."
+for dir in /workspace/output/maps/*/; do
+    if [ -d "$dir" ]; then
+        python3 /workspace/scripts/format_slam_output.py --map_dir "$dir"
+    fi
+done
+
 echo "Map saved to your maps/ folder. Press Ctrl+C to exit."
 
 # Wait for the background ROS launch to finish (when user presses Ctrl+C)
