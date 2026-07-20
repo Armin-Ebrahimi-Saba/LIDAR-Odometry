@@ -211,7 +211,7 @@ python3 scripts/ply2pcd.py results/deliverables/map_test1.ply \
 | Fix | Problem | Solution |
 |---|---|---|
 | IMU message type | `aspn_msgs/MeasurementIMU` (custom, GLIM can't subscribe) | Convert to `sensor_msgs/msg/Imu` |
-| Accelerometer sign | At rest read `[0.15, -0.12, **-9.6**]` — GTSAM expects **+9.81** on the up-axis at rest (per GLIM docs) | Negate all 3 axes |
+| Accelerometer sign | At rest read `[0.15, -0.12, **-9.6**]`. GTSAM expects **+9.81** on the up-axis at rest (per GLIM docs) | Negate all 3 axes |
 | Per-point timestamps | Field named `timeoffset` (ms), not `t`/`time`/`timestamp` GLIM recognizes → fell back to pseudo-timestamps, degrading deskewing | Rename to `time`, convert ms→s |
 
 `aspn_msgs` has no public ROS2 package, since it's an own implementation of the 
@@ -231,9 +231,9 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
 | **run2** | **0.01 / 0.005** | **1e-5** | — | **72.3** | **Final config** |
 | run3 | 0.05 / 0.02 | 0.01 | — | 92.5 | Worse |
 | run4 | 0.1 / 0.05 | 1e-3 | — | 73.8 | |
-| run5 | 1e-5 / 1e-5 | 1e-5 | — | 95.3 | Worse (over-confident IMU) |
+| run5 | 1e-5 / 1e-5 | 1e-5 | — | 95.3 | Worse (over confident IMU) |
 | run6 | 0.01 / 0.005 | 1e-5 | `T_lidar_imu`=identity | 91.0 | Manufacturer default (run2) better |
-| run7 | 0.01 / 0.005 | 1e-5 | deskew off | 67.4 | Lower RMSE, visibly worse map — kept deskew on |
+| run7 | 0.01 / 0.005 | 1e-5 | deskew off | 67.4 | Lower RMSE, visibly worse map with deskew kept on |
 
 <p align="center">
   <img src="results/deliverables/raw_gnss_check.png" width="500">
