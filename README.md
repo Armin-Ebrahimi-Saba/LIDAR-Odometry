@@ -235,8 +235,10 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
 | run6 | 0.01 / 0.005 | 1e-5 | `T_lidar_imu`=identity | 91.0 | Manufacturer default (run2) better |
 | run7 | 0.01 / 0.005 | 1e-5 | deskew off | 67.4 | Lower RMSE, visibly worse map — kept deskew on |
 
-![error plot](results/deliverables/test1_error_plot.png)
 ![raw GNSS check](results/deliverables/raw_gnss_check.png)
+![Error plot of run2](results/deliverables/run2/run2_error_plot.png)
+![Generated map of run2 in topdown view, grey scaled](results/deliverables/run2/map_run2_topdown_gray.png)
+![Generated map of run2 in topdown view, colored](results/deliverables/run2/map_run2_topdown_height.png)
 
 ## What are being ruled out
 
