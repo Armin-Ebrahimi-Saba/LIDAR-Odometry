@@ -248,7 +248,7 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
 </p>
 
 <p align="center">
-  <img scr="results/deliverables/run2/run2_satellite.png" width="500">
+  <img src="results/deliverables/run2/run2_satellite.png" width="500">
   <br>
   <em>GLIM trajectory of run2 and GNSS in satellite view</em>
 </p>
@@ -265,11 +265,7 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
   <em>Generated map of run2 in top-down view (colored height map)</em>
 </p>
 
-<p align="center">
-  <video src="https://www.youtube.com/watch?v=KeU6mBA8BLE" loop autoplay muted controls>
-  <br>
-  <em>Live GLIM run2 on data outdoor1 (16x speed)</em>
-</p>
+<video src="https://www.youtube.com/watch?v=KeU6mBA8BLE" loop autoplay muted controls></video>
 
 ## What are being ruled out
 
