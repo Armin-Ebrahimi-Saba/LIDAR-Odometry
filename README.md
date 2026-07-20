@@ -1,10 +1,11 @@
 # Final Report: Application of LIO-SAM 6AXIS for LiDAR-based Positioning
-
+> **Project Goal:** Applying SLAM (LIO-SAM-6AXIS) to the provided Test 1 dataset resulted in a 2D trajectory, a 3D point cloud, and an error plot
+> 
 <video
 src="https://github.com/user-attachments/assets/8927424c-57e8-4176-9076-d3b6719260ea"
 loop autoplay muted controls></video>
 
-> **Project Goal:** To construct a highly accurate 6-DoF trajectory and 3D point cloud map utilizing raw data from an Ouster OS0-32 LiDAR, an internal IMU, and RTK-GNSS positioning from a PX4 Autopilot.
+
 
 ---
 
