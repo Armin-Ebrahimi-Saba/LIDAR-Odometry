@@ -1,5 +1,5 @@
 # Final Report: LIO-SAM 6AXIS
-> **Project Goal:** Applying SLAM (LIO-SAM-6AXIS) to the provided Test 1 dataset resulted in a 2D trajectory, a 3D point cloud, and an error plot. Furthermore, comparing the use of LIDAR points + IMU with LIDAR points + IMU + GNSS data.
+> **Project Goal:** Applying SLAM (LIO-SAM-6AXIS: https://github.com/JokerJohn/LIO_SAM_6AXIS) to the provided Test 1 dataset resulted in a 2D trajectory, a 3D point cloud, and an error plot. Furthermore, comparing the use of LIDAR points + IMU with LIDAR points + IMU + GNSS data.
 > 
 <video
 src="https://github.com/user-attachments/assets/8927424c-57e8-4176-9076-d3b6719260ea"
@@ -12,7 +12,7 @@ loop autoplay muted controls></video>
 ## 1. Code Architecture
 
 ### 1.1 Branch Structure
-The repository is organized into the following key directories to maintain a clean separation of concerns:
+This Branch is organized into the following key directories to maintain a clean separation of concerns:
 
 ```text
 .
@@ -22,10 +22,10 @@ The repository is organized into the following key directories to maintain a cle
 ```
 
 ### 1.2 Data Pre-Processing
-The core data for this module is provided as **Test 1**, recorded by an XTrack vehicle platform. Crucially, the raw data is provided as a **ROS 2 Bagfile**, while LIO-SAM 6AXIS requires **ROS 1 Melodic** to function. Furthermore, the raw sensor messages are published in hardware-specific ROS 2 message types that standard SLAM nodes cannot interpret directly.
+The core data for this module is provided as **Test 1**, recorded by an XTrack vehicle. The raw data is provided as a **ROS 2 Bagfile**, while LIO-SAM 6AXIS requires **ROS 1 Melodic** to function. Furthermore, the raw sensor messages are published in hardware-specific ROS 2 message types that standard SLAM nodes cannot interpret directly.
 
 **Topic Requirements & Conversion:**
-The system specifically targets three raw data streams:
+The system specifically targets three raw data streams from the rosbag:
 
 | Sensor Source | Original ROS 2 Topic | Original Message Type | Required LIO-SAM Topic | Required Message Type |
 | :--- | :--- | :--- | :--- | :--- |
@@ -33,12 +33,12 @@ The system specifically targets three raw data streams:
 | **IMU** | `/ouster/imu_meas` | `aspn_msgs/MeasurementIMU` | `/stim300/imu/data_raw` | `sensor_msgs/Imu` |
 | **GNSS/GPS** | `/fmu/out/vehicle_gps_position` | `px4_msgs/SensorGps` | `/gps/fix` | `sensor_msgs/NavSatFix` |
 
-To bridge the gap between the raw ROS 2 inputs and the ROS 1 LIO-SAM requirements, the `bag_preparation` directory contains two vital scripts:
+To bridge the gaps between the raw ROS 2 inputs and the ROS 1 LIO-SAM requirements, the `bag_preparation` directory contains two vital scripts:
 1.  **`convert_bag.py`**: Reads the ROS 2 bag and converts the hardware-specific message types of the Ouster IMU and PX4 Autopilot GPS into standard `sensor_msgs/Imu` and `sensor_msgs/NavSatFix` messages.
-2.  **`fix_ouster_bag.py`**: Ouster sensors without PTP time synchronization suffer from highly asynchronous timestamps between the LiDAR and IMU. This script smooths and aligns these timestamps within the bag file; without this, the LIO-SAM factor graph crashes immediately upon initialization.
+2.  **`fix_ouster_bag.py`**: The provided data from the Ouster sensors suffer from asynchronous timestamps between the LiDAR and IMU. This script smooths and aligns these timestamps within the bag file; without this, LIO-SAM crashes immediately upon initialization.
 
 ### 1.3 Containerized Pipeline
-After pre-processing, the system is deployed using a containerized **ROS Melodic** environment. This isolates the legacy ROS 1 dependencies from the modern host machine. The complete pipeline is illustrated in the diagram below:
+After pre-processing, the system is deployed using a containerized **ROS Melodic** environment. This isolates the ROS 1 dependencies from the host machine. The complete pipeline is illustrated in the diagram below:
 
 ```mermaid
 flowchart TD
@@ -46,75 +46,71 @@ flowchart TD
         B1[(Raw ROS 2 Bag)] -->|Extract Binaries| conv(convert_bag.py)
         conv -->|Standard ROS msgs| P1(fix_ouster_bag.py)
         P1 -->|Repaired Timestamps| B2[(lio_sam_ready.bag)]
-        GNSS[(GNSS Data)]
     end
 
     subgraph Docker Container: ROS Melodic
         patch(patch_yaml.py) -.->|Modifies config| core
         B2 -->|Playback & Remap| core{LIO-SAM 6AXIS Core}
-        GNSS -->|5m threshold triggers| core
+        B2 -->|5m threshold triggers for GNSS data| core
         core -->|Mapping| pcd[.pcd Point Clouds]
         core -->|Odometry| txt[optimized_odom.txt]
     end
 ```
 
 **Pipeline Components:**
-*   **Containerization (`docker-compose.yml`)**: Spawns an isolated `lio_sam_6axis` environment.
-*   **Dynamic Configuration (`patch_yaml.py`)**: Automatically injects dynamic hardware variables and noise tolerances directly into the LIO-SAM parameter files before execution.
-*   **Execution Scripts (`run_lio_sam.sh` & `run_lio_sam_gnss.sh`)**: Orchestrates the time-synchronized playback, remaps the topics from the ROS 2 bag to the ROS 1 node names (as shown in the table above), and triggers auto-saving of the map upon completion.
+*   **`docker-compose.yml`**: Creates an isolated `lio_sam_6axis` environment.
+*   **`patch_yaml.py`**: Insertes variables and noise tolerances directly into the LIO-SAM parameter files before execution.
+*   **`run_lio_sam.sh` & `run_lio_sam_gnss.sh`**: Orchestrates the time-synchronized playback, remaps the topics from the ROS 2 bag to the ROS 1 node names (as shown in the table above), and triggers auto-saving of the results after completion.
 
 ---
 
 ## 2. Choice of Algorithms & System Design
 
+**How LIO-SAM 6AXIS Works:**
+LIO-SAM 6AXIS is a specialized adaptation of the original LIO-SAM (LiDAR Inertial Odometry via Smoothing and Mapping) framework, designed specifically to operate with 6-axis IMUs (which measure 3-axis acceleration and 3-axis angular velocity but lack a magnetometer for absolute heading). The system functions by constructing a non-linear factor graph to tightly couple LiDAR odometry and IMU pre-integration. The IMU data is first used to de-skew the continuous LiDAR sweeps and provide a high-frequency, initial motion estimate. This estimate is then refined by matching extracted LiDAR point cloud features (such as edges and planar surfaces) against a maintained global map. Because it relies only on 6-axis data, it is highly flexible and perfectly suited for sensors like the Ouster LiDAR, which feature internal 6-axis IMUs rather than 9-axis variants.
+
 ### 2.1 Algorithm Selection
-**LIO-SAM 6AXIS** (LiDAR Inertial Odometry via Smoothing and Mapping) was selected for its tightly-coupled LiDAR-IMU architecture built upon a factor graph (GTSAM). Unlike loosely-coupled methods, LIO-SAM pre-integrates IMU measurements between LiDAR scans to de-skew the point cloud and provide a robust initial guess for LiDAR odometry. This makes it highly resilient to rapid motions and feature-poor environments.
+**LIO-SAM 6AXIS** (LiDAR Inertial Odometry via Smoothing and Mapping) was selected for its tightly-coupled LiDAR-IMU architecture built upon a factor graph (GTSAM). Unlike uncoupled methods, LIO-SAM pre-integrates IMU measurements between LiDAR scans to de-skew the point cloud and provide a robust initial guess for LiDAR odometry. This makes it highly resilient to rapid motions and feature-poor environments.
 
 ### 2.2 System Simplifications & Assumptions
-To make the algorithm function with the unique properties of the Sensys dataset, several core assumptions and parameter modifications were required:
+To make the algorithm function with the properties of the provided dataset, some assumptions and parameter modifications were required:
 
-*   **Extrinsic Rotation & RPY (Assumed Identity)**: The extrinsic calibration matrix between the LiDAR and the IMU was forced to the identity matrix (`[1,0,0, 0,1,0, 0,0,1]`). We assumed the internal IMU is mechanically aligned perfectly with the optical center of the Ouster sensor.
-*   **Gravity Vector (`imuGravity`)**: ROS standard REP-145 dictates gravity is recorded as an upward reaction force ($+9.81$). The Ouster sensor records it downwards. We applied a hardcoded modification to `-9.80511` to prevent immediate mathematical divergence.
-*   **IMU Noise/Bias Tolerances (`imuAccNoise`, `imuGyrNoise`)**: The internal Ouster IMU is known to be relatively low-grade compared to external, dedicated tactical-grade IMUs. *Simplification:* We heavily increased the `imuAccNoise` and `imuGyrNoise` parameters in the configuration. By doing so, the factor graph optimization "trusts" the IMU less over long durations, relying more heavily on the LiDAR point-to-plane ICP registrations, preventing long-term drift accumulation.
+*   **Extrinsic Rotation & RPY (Assumed Identity)**: The extrinsic calibration matrix between the LiDAR and the IMU was set to the identity matrix (`[1,0,0, 0,1,0, 0,0,1]`). There is no transformation between the LiDAR and the IMU, since the Ouster IMU was used for this project.
+*   **Gravity Vector (`imuGravity`)**: ROS standard REP-145 dictates gravity is recorded as an upward reaction force (+9.81). The Ouster sensor records it downwards. A hardcoded modification of `-9.80511` was applied to prevent mathematical divergence.
+*   **IMU Noise/Bias Tolerances (`imuAccNoise`, `imuGyrNoise`)**: The internal Ouster IMU is known to be relatively low-grade compared to external, dedicated IMUs. *Adaptation:* The `imuAccNoise` and `imuGyrNoise` parameters were increased in the configuration. By doing so, the factor graph optimization "trusts" the IMU less over long durations, relying more on the LiDAR point-to-plane ICP registrations, reducing long-term drift accumulation.
 
-### 2.3 Advanced GNSS Integration Patches
-Integrating the absolute RTK-GNSS positioning from the PX4 Autopilot into LIO-SAM presented significant engineering hurdles. 
+### 2.3 Challanges
+Some changes to the code of LIO-SAM-6AXIS were neccessary to make it run:
 
-When the vehicle starts, it is stationary for an extended period. The raw GNSS signal drifts heavily during this stationary phase (creating a "spaghetti node" of false movements). If LIO-SAM initializes its global reference frame (Yaw) based on this noisy stationary data, the entire map will be rotated incorrectly.
+1. **Automated Docker Patches (`patch.py` at runtime/buildtime):**
+   *   **Eigen Alignment Fix:** Automatically added the macro `EIGEN_MAKE_ALIGNED_OPERATOR_NEW` to all core classes (such as `ParamServer` and `mapOptimization`) to prevent memory segmentation faults during memory allocation on modern processors (AVX/AVX2).
+   *   **Ouster Timestamp Struct:** Modified the `OusterPointXYZIRT` struct so that the timestamp `t` exactly matches the scaling of the bags (`dst.time = src.t * 1e-9f;`); otherwise, the point cloud registration crashes.
 
-**Detailed Source Code Patches:** 
-Wir haben gezielte C++ Patches tief in die Architektur von LIO-SAM injiziert, um es robuster zu machen. Die wichtigsten Anpassungen im Detail:
+**GNSS Integration**
+Integrating the GNSS positioning from the PX4 Autopilot into LIO-SAM presented some challenges. 
+
+When the vehicle starts, it is stationary for a significant period. The raw GNSS signal drifts heavily during this stationary phase. If LIO-SAM initializes its global reference frame (Yaw) based on this noisy stationary data, the entire map would be rotated incorrectly.
 
 1. **`simpleGpsOdom_patched.cpp` (GNSS Odometry Injection):**
-   *   **5-Meter Initialization Threshold:** Einbau eines Distanz-Checks (`if (distance > 5.0)`). Das System ignoriert alle GNSS-Daten und initialisiert die globale Orientierung (Yaw) erst, wenn das Fahrzeug sich physisch 5 Meter vom Startpunkt wegbewegt hat. Das verhindert das "Spaghetti-Driften" im Stand.
-   *   **Coordinate System Rotation:** Die ENU-Koordinaten (East-North-Up) werden explizit rotiert, um sich an den initialen Winkel (Yaw) der lokalen LiDAR-Odometry anzupassen (`calib_enu(0) = rx; calib_enu(1) = ry;`).
-   *   **Covariance Injection:** Die echten Messungenauigkeiten (`covariance`) aus der ROS 2 Bag (`msg->position_covariance`) werden direkt in die `nav_msgs::Odometry` Nachricht für den Factor-Graph weitergeleitet, anstatt fehleranfällige Standardwerte zu verwenden.
+   *   **5-Meter Initialization Threshold:** Implemented a distance check (`if (distance > 5.0)`). The system ignores all GNSS data and only initializes the global orientation (Yaw) once the vehicle has physically moved 5 meters away from the starting point. This prevents "spaghetti drifting" while stationary.
+   *   **Coordinate System Rotation:** The ENU (East-North-Up) coordinates are explicitly rotated to align with the initial angle (Yaw) of the local LiDAR odometry (`calib_enu(0) = rx; calib_enu(1) = ry;`).
+   *   **Covariance Injection:** The actual measurement uncertainties (`covariance`) from the ROS 2 bag (`msg->position_covariance`) are forwarded directly into the `nav_msgs::Odometry` message for the factor graph, instead of using error-prone default values.
 
 2. **`mapOptmizationGps.cpp` (Factor Graph Integration):**
-   *   **GTSAM Node Injection:** Diese Datei (welche zur Laufzeit aktiv gemountet wird) enthält die erweiterte Backend-Logik, um die vorverarbeitete GNSS-Odometrie überhaupt in den Non-Linear Factor Graph (GTSAM) einspeisen zu können. Hier werden die absoluten GNSS-Koordinaten als verankerte "Prior Factors" in die globale Trajektorienoptimierung eingebunden. Ohne diese angepasste Logik würde LIO-SAM die GPS-Pings schlichtweg ignorieren.
-
-3. **Automated Docker Patches (`patch.py` zur Laufzeit/Buildzeit):**
-   *   **Eigen Alignment Fix:** Automatisches Hinzufügen des Makros `EIGEN_MAKE_ALIGNED_OPERATOR_NEW` in alle Kernklassen (wie `ParamServer`, `mapOptimization`), um Memory-Segfaults auf modernen Prozessoren (AVX/AVX2) bei der Speicherallokation zu verhindern.
-   *   **Ouster Timestamp Struct:** Modifikation des Structs `OusterPointXYZIRT`, sodass der Zeitstempel `t` exakt zur Skalierung der Bags passt (`dst.time = src.t * 1e-9f;`), andernfalls stürzt die Point-Cloud Registrierung ab.
+   *   **GTSAM Node Injection:** This file (which is actively mounted at runtime) contains the extended backend logic required to feed the pre-processed GNSS odometry into the non-linear factor graph (GTSAM). Here, the absolute GNSS coordinates are integrated as anchored "prior factors" into the global trajectory optimization. Without this adapted logic, LIO-SAM would simply ignore the GPS pings.
 
 ---
 
 ## 3. Results & Evaluation
 
-The final evaluation was conducted using custom Python scripts (`plot_comparison.py`) running entirely outside of ROS, relying on standard libraries to compare the drifting trajectories against the high-accuracy Ground Truth. *(Note: The raw data, outputs, and evaluation scripts have been omitted from this slimmed-down repository delivery).*
+The final evaluation was conducted using custom Python scripts running outside of ROS, relying on standard libraries to compare the drifting trajectories against the Ground Truth GNSS data. *(Note: The raw data, outputs, and evaluation scripts have been omitted from this slimmed-down repository delivery. All plots are contained in a result folder).*
 
+###Produced point clouds for Test 1  
 <img width="4811" height="2966" alt="my_comparison" src="https://github.com/user-attachments/assets/4b1a37b1-c5e9-4614-8e5b-6755b14247e7" />
 
 ### 3.1 Evaluation Pipeline
-1. `extract_origin.py` reads the initial reference angle (Yaw) and the starting LLA coordinates.
-2. `plot_comparison.py` maps the local Cartesian LiDAR frames back to WGS84 global coordinates.
-3. Results are rendered into an interactive web viewer (`plot_viewer_map.html`).
+
 
 ### 3.2 Findings
-*   **Raw GNSS (No LIO-SAM):** Exhibited severe multi-path errors and stationary drift.
-*   **LIO-SAM (LiDAR + IMU only):** Provided extremely smooth local trajectories and sharp point cloud maps. However, over the 14-minute runtime, slight rotational drift accumulated, leading to deviations from the absolute global path.
-*   **GNSS-Optimized LIO-SAM:** By applying our custom 5-meter movement threshold patches, the factor graph successfully pulled the drifting LiDAR map back to the absolute RTK ground truth, correcting both translational and rotational drift seamlessly.
 
-### 3.3 Engineering Challenges Conquered
-1.  **Asynchronous Timestamps:** The biggest initial challenge was the total failure of LIO-SAM due to asynchronous LiDAR and IMU message timestamps. Developing `fix_ouster_bag.py` to rewrite the temporal headers of the `.db3` bag was crucial for the factor graph to even initialize.
-2.  **Stationary GPS Noise:** As detailed above, modifying the C++ source code to delay GPS initialization was critical. Without this, maps were consistently generated with a 15-40 degree rotational error relative to True North.
+
