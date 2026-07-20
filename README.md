@@ -265,7 +265,7 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
   <em>Generated map of run2 in top-down view (colored height map)</em>
 </p>
 
-<video src="https://www.youtube.com/watch?v=KeU6mBA8BLE" loop autoplay muted controls></video>
+[![Run 2 demonstration](https://img.youtube.com/vi/KeU6mBA8BLE/maxresdefault.jpg)](https://www.youtube.com/watch?v=KeU6mBA8BLE)
 
 ## What are being ruled out
 
