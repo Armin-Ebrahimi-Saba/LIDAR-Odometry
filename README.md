@@ -235,10 +235,29 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
 | run6 | 0.01 / 0.005 | 1e-5 | `T_lidar_imu`=identity | 91.0 | Manufacturer default (run2) better |
 | run7 | 0.01 / 0.005 | 1e-5 | deskew off | 67.4 | Lower RMSE, visibly worse map — kept deskew on |
 
-![raw GNSS check](results/deliverables/raw_gnss_check.png)
-![Error plot of run2](results/deliverables/run2/run2_error_plot.png)
-![Generated map of run2 in topdown view, grey scaled](results/deliverables/run2/map_run2_topdown_gray.png)
-![Generated map of run2 in topdown view, colored](results/deliverables/run2/map_run2_topdown_height.png)
+<p align="center">
+  <img src="results/deliverables/raw_gnss_check.png" width="500">
+  <br>
+  <em>Raw GNSS check</em>
+</p>
+
+<p align="center">
+  <img src="results/deliverables/run2/run2_error_plot.png" width="500">
+  <br>
+  <em>Error plot of run2</em>
+</p>
+
+<p align="center">
+  <img src="results/deliverables/run2/map_run2_topdown_gray.png" width="500">
+  <br>
+  <em>Generated map of run2 in top-down view (grayscale)</em>
+</p>
+
+<p align="center">
+  <img src="results/deliverables/run2/map_run2_topdown_height.png" width="500">
+  <br>
+  <em>Generated map of run2 in top-down view (colored height map)</em>
+</p>
 
 ## What are being ruled out
 
