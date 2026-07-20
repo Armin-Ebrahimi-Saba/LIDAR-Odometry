@@ -261,10 +261,10 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
 
 ## What are being ruled out
 
-- **Clock desync** - scanned RMSE across ±20s offset (`find_timeoffset.py`): flat curve, no localized minimum.
-- **GNSS data quality** — raw track inspected directly (`plot_raw_gnss.py`): largest jump = plausible 0.4 m/s over 15.6s (recording pause), no teleports.
-- **Extrinsics** — identity vs. manufacturer default (run2 vs. run7): both poor, default slightly better; millimeters can't explain tens of meters either way.
-- **`aspn_msgs`/sign/deskewing bugs** — all fixed and independently verified (gravity magnitude, GLIM's own convention docs, warning-message disappearance).
+- **Clock desync**, scanned RMSE across ±20s offset (`find_timeoffset.py`): flat curve, no localized minimum.
+- **GNSS data quality**, raw track inspected directly (`plot_raw_gnss.py`): largest jump = plausible 0.4 m/s over 15.6s (recording pause), no teleports.
+- **Extrinsics**, identity vs. manufacturer default (run2 vs. run7): both poor, default slightly better; millimeters can't explain tens of meters either way.
+- **`aspn_msgs`/sign/deskewing bugs**, all fixed and independently verified (gravity magnitude, GLIM's own convention docs, warning-message disappearance).
 
 ## Root cause: weak loop closure
 
