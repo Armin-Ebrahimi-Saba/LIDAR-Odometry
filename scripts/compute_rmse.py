@@ -48,8 +48,8 @@ def make_plots(t_matched, errors, src_aligned, dst, prefix, label):
     print(f"Saved: {out}")
 
 
-def make_map_plot(t_est, xyz_est_aligned, lat0, lon0, alt0,
-                   t_gt, lats_gt, lons_gt, prefix, label, interval=100.0,
+def make_map_plot(xyz_est_aligned, lat0, lon0, alt0,
+                   t_gt_matched, lats_gt_matched, lons_gt_matched, prefix, label, interval=100.0,
                    satellite=True):
     """Overlay both trajectories on a real map background, saved as a static PNG."""
 
@@ -61,7 +61,7 @@ def make_map_plot(t_est, xyz_est_aligned, lat0, lon0, alt0,
         y = np.log(np.tan((90 + lat) * np.pi / 360.0)) / (np.pi / 180.0) * k
         return x, y
 
-    x_gt, y_gt = to_web_mercator(lats_gt, lons_gt)
+    x_gt, y_gt = to_web_mercator(lats_gt_matched, lons_gt_matched)
     x_est, y_est = to_web_mercator(lats_est, lons_est)
 
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -71,9 +71,9 @@ def make_map_plot(t_est, xyz_est_aligned, lat0, lon0, alt0,
             zorder=3)
 
     # Time markers every `interval` seconds, on the GNSS track
-    t0 = t_gt[0]
+    t0 = t_gt_matched[0]
     next_marker = 0.0
-    for i, t in enumerate(t_gt):
+    for i, t in enumerate(t_gt_matched):
         if t - t0 >= next_marker:
             ax.scatter(x_gt[i], y_gt[i], color='yellow', edgecolor='black',
                        s=60, zorder=4)
@@ -136,6 +136,10 @@ def main():
     src_aligned = (R @ src.T).T + t_vec
     errors = np.linalg.norm(src_aligned - dst, axis=1)
 
+    t_gt_matched = t_gt[idx_gt]
+    lats_gt_matched = lats[idx_gt]
+    lons_gt_matched = lons[idx_gt]
+
     rmse = np.sqrt(np.mean(errors ** 2))
     mean_err, median_err, max_err, std_err = errors.mean(), np.median(errors), errors.max(), errors.std()
 
@@ -158,7 +162,7 @@ def main():
 
     # Full (not just matched) GLIM trajectory, aligned, for a smoother map overlay
     xyz_full_aligned = (R @ xyz_est.T).T + t_vec
-    make_map_plot(t_est, xyz_full_aligned, lat0, lon0, alt0, t_gt, lats, lons, prefix, label)
+    make_map_plot(xyz_full_aligned, lat0, lon0, alt0, t_gt_matched, lats_gt_matched, lons_gt_matched, prefix, label)
 
 
 if __name__ == "__main__":
