@@ -3,8 +3,6 @@ build/
 install/
 log/
 results/dump/
-results/run2/
-results/deliverables/
 *.tar.gz
 *.db3
 imgui.ini
