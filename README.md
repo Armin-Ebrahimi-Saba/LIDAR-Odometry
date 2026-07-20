@@ -52,8 +52,8 @@ flowchart TD
         patch(patch_yaml.py) -.->|Modifies config| core
         B2 -->|Playback & Remap| core{LIO-SAM 6AXIS Core}
         B2 -->|5m threshold triggers for GNSS data| core
-        core -->|Mapping| pcd[.pcd Point Clouds]
-        core -->|Odometry| txt[optimized_odom.txt]
+        core -->|Mapping| pcd[map3d.pcd Point Clouds]
+        core --> txt[SLAM_path.csv]
     end
 ```
 
@@ -95,12 +95,10 @@ Follow these steps to run the SLAM pipeline on your machine:
 ---
 
 ## 2. Choice of Algorithms & System Design
-
-**How LIO-SAM 6AXIS Works:**
-LIO-SAM 6AXIS is a specialized adaptation of the original LIO-SAM (LiDAR Inertial Odometry via Smoothing and Mapping) framework, designed specifically to operate with 6-axis IMUs (which measure 3-axis acceleration and 3-axis angular velocity but lack a magnetometer for absolute heading). The system functions by constructing a non-linear factor graph to tightly couple LiDAR odometry and IMU pre-integration. The IMU data is first used to de-skew the continuous LiDAR sweeps and provide a high-frequency, initial motion estimate. This estimate is then refined by matching extracted LiDAR point cloud features (such as edges and planar surfaces) against a maintained global map. Because it relies only on 6-axis data, it is highly flexible and perfectly suited for sensors like the Ouster LiDAR, which feature internal 6-axis IMUs rather than 9-axis variants.
-
-### 2.1 Algorithm Selection
 **LIO-SAM 6AXIS** (LiDAR Inertial Odometry via Smoothing and Mapping) was selected for its tightly-coupled LiDAR-IMU architecture built upon a factor graph (GTSAM). Unlike uncoupled methods, LIO-SAM pre-integrates IMU measurements between LiDAR scans to de-skew the point cloud and provide a robust initial guess for LiDAR odometry. This makes it highly resilient to rapid motions and feature-poor environments.
+
+### 2.1 How LIO-SAM 6AXIS Works:
+LIO-SAM 6AXIS is a specialized adaptation of the original LIO-SAM (LiDAR Inertial Odometry via Smoothing and Mapping) framework, designed specifically to operate with 6-axis IMUs (which measure 3-axis acceleration and 3-axis angular velocity but lack a magnetometer for absolute heading). The system functions by constructing a non-linear factor graph to tightly couple LiDAR odometry and IMU pre-integration. The IMU data is first used to de-skew the continuous LiDAR sweeps and provide a high-frequency, initial motion estimate. This estimate is then refined by matching extracted LiDAR point cloud features (such as edges and planar surfaces) against a maintained global map. Because it relies only on 6-axis data, it is highly flexible and perfectly suited for sensors like the Ouster LiDAR, which feature internal 6-axis IMUs rather than 9-axis variants.
 
 ### 2.2 System Simplifications & Assumptions
 To make the algorithm function with the properties of the provided dataset, some assumptions and parameter modifications were required:
