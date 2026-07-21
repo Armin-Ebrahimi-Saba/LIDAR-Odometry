@@ -83,8 +83,14 @@ Follow these steps to run the SLAM pipeline on your machine:
    docker-compose up
    ```
    If you want to enable GNSS fusion (make sure you converted the bags with the GNSS scripts first!), run it with the `USE_GNSS` environment variable set:
+   
+   **On Linux/macOS:**
    ```bash
    USE_GNSS=true docker-compose up
+   ```
+   **On Windows (PowerShell):**
+   ```powershell
+   $env:USE_GNSS="true"; docker-compose up
    ```
 3. **Wait for Completion**: Docker Compose will launch the container, configure LIO-SAM dynamically, play the bag file, and process the data. 
 4. **Output Generation**: Once finished, the pipeline automatically processes the results and saves them in the `output/maps/` directory. You will find exactly two files for each run:

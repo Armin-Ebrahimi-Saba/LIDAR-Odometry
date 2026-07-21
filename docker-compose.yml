@@ -17,5 +17,6 @@ services:
       - ./src/LIO-SAM-6AXIS-src/mapOptmizationGps.cpp:/root/workspace/src/LIO_SAM_6AXIS/LIO-SAM-6AXIS/src/mapOptmizationGps.cpp:ro
     working_dir: /workspace
     # To run without GNSS (default): docker-compose up
-    # To run WITH GNSS: USE_GNSS=true docker-compose up
+    # To run WITH GNSS on Linux/Mac: USE_GNSS=true docker-compose up
+    # To run WITH GNSS on Windows (PowerShell): $env:USE_GNSS="true"; docker-compose up
     command: /bin/zsh -c "source /opt/ros/melodic/setup.zsh && cd /root/workspace && catkin build && source devel/setup.zsh && cd /workspace && if [ \"$$USE_GNSS\" = \"true\" ]; then ./scripts/run_lio_sam_gnss.sh; else ./scripts/run_lio_sam.sh; fi"
