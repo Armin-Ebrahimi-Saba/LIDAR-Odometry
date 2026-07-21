@@ -3,19 +3,16 @@
 GNSS ground truth: error-over-time plot, top-down (local ENU) comparison
 plot, and an interactive real-map overlay (OpenStreetMap + satellite tiles).
 
-Note: evaluation is automatically scoped to only whatever portion of the
-route GLIM actually processed. If GLIM stopped partway through the bag,
-t_est simply won't contain later timestamps, so nothing beyond what GLIM
-produced is compared against.
-
-Usage: python3 compute_rmse.py <traj_lidar.txt> <gnss_csv> <output_prefix> [label]
+Usage:
+  python3 scripts/compute_rmse.py <traj_lidar.txt> <gnss_csv> <output_prefix> [label] [--offset OFFSET]
 """
+import argparse
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import contextily as cx
 from utils import (load_glim_traj, load_gnss, latlon_to_local_enu,
-                    local_enu_to_latlon, compute_alignment)
+                   local_enu_to_latlon, compute_alignment)
 
 
 def make_plots(t_matched, errors, src, src_aligned, dst, prefix, label):
@@ -62,7 +59,7 @@ def make_plots(t_matched, errors, src, src_aligned, dst, prefix, label):
         label='GLIM (aligned)'
     )
 
-    # Optional: highlight start positions
+    # Highlight start positions
     axes[1].scatter(dst[0,0], dst[0,1], color='green', marker='*', s=120)
     axes[1].scatter(src[0,0], src[0,1], color='red', marker='o', s=70)
     axes[1].scatter(src_aligned[0,0], src_aligned[0,1], color='blue', marker='x', s=90)
@@ -117,9 +114,9 @@ def make_map_plot(xyz_est_aligned, lat0, lon0, alt0,
             next_marker += interval
 
     ax.scatter(x_gt[0], y_gt[0], color='lime', edgecolor='black', s=150,
-               marker='*', zorder=5, label='start')
+                marker='*', zorder=5, label='start')
     ax.scatter(x_gt[-1], y_gt[-1], color='red', edgecolor='black', s=150,
-               marker='X', zorder=5, label='end')
+                marker='X', zorder=5, label='end')
 
     ax.set_xlim(min(x_gt.min(), x_est.min()) - 30, max(x_gt.max(), x_est.max()) + 30)
     ax.set_ylim(min(y_gt.min(), y_est.min()) - 30, max(y_gt.max(), y_est.max()) + 30)
@@ -139,21 +136,22 @@ def make_map_plot(xyz_est_aligned, lat0, lon0, alt0,
 
 
 def main():
-    if len(sys.argv) < 4:
-        print("Usage: compute_rmse.py <traj_lidar.txt> <gnss_csv> <output_prefix> [label]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Compute RMSE between GLIM trajectory and GNSS ground truth.")
+    parser.add_argument("traj_path", help="Path to GLIM trajectory txt file")
+    parser.add_argument("gnss_path", help="Path to GNSS ground truth CSV file")
+    parser.add_argument("prefix", help="Output file prefix")
+    parser.add_argument("label", nargs="?", default="", help="Label for plot titles")
+    parser.add_argument("--offset", type=float, default=0.0, help="Time offset in seconds to add to GLIM timestamps")
 
-    traj_path, gnss_path, prefix = sys.argv[1], sys.argv[2], sys.argv[3]
-    label = sys.argv[4] if len(sys.argv) > 4 else ""
+    args = parser.parse_args()
 
-    t_est, xyz_est = load_glim_traj(traj_path)
-    t_gt, lats, lons, alts = load_gnss(gnss_path)
+    t_est, xyz_est = load_glim_traj(args.traj_path)
+    t_gt, lats, lons, alts = load_gnss(args.gnss_path)
 
-    # Correcting the timestamp offset between rosbag and GNSS
-    offset = t_est[0] - t_gt[0]
-    t_gt = t_gt + offset
-    print(f"Applied GNSS timestamp offset: {offset}s")
-    print(f"Corrected GNSS range: {t_gt[0]:.3f} -> {t_gt[-1]:.3f}")
+    # Apply user-specified time offset to GLIM timestamps
+    if args.offset != 0.0:
+        t_est = t_est + args.offset
+        print(f"Applied GLIM timestamp offset: {args.offset:.3f}s")
 
     print(f"GLIM trajectory: {len(t_est)} poses, {t_est[0]:.3f} -> {t_est[-1]:.3f} "
           f"({t_est[-1]-t_est[0]:.1f}s processed)")
@@ -229,25 +227,25 @@ def main():
     mean_err, median_err, max_err, std_err = errors.mean(), np.median(errors), errors.max(), errors.std()
 
     print()
-    print(f"=== Absolute Trajectory Error{' - ' + label if label else ''} ===")
+    print(f"=== Absolute Trajectory Error{' - ' + args.label if args.label else ''} ===")
     print(f"RMSE:   {rmse:.3f} m")
     print(f"Mean:   {mean_err:.3f} m")
     print(f"Median: {median_err:.3f} m")
     print(f"Std:    {std_err:.3f} m")
     print(f"Max:    {max_err:.3f} m")
 
-    np.savetxt(f"{prefix}_errors.csv", np.column_stack([t_matched, errors]),
+    np.savetxt(f"{args.prefix}_errors.csv", np.column_stack([t_matched, errors]),
                header="timestamp,error_m", delimiter=",", comments="")
-    np.savetxt(f"{prefix}_aligned_trajectory.csv",
+    np.savetxt(f"{args.prefix}_aligned_trajectory.csv",
                np.column_stack([t_matched, src_aligned, dst]),
                header="timestamp,est_x,est_y,est_z,gt_x,gt_y,gt_z", delimiter=",", comments="")
-    print(f"\nSaved: {prefix}_errors.csv, {prefix}_aligned_trajectory.csv")
+    print(f"\nSaved: {args.prefix}_errors.csv, {args.prefix}_aligned_trajectory.csv")
 
-    make_plots(t_matched, errors, src, src_aligned, dst, prefix, label)
+    make_plots(t_matched, errors, src, src_aligned, dst, args.prefix, args.label)
 
-    # Full (not just matched) GLIM trajectory, aligned, for a smoother map overlay
+    # Full GLIM trajectory aligned for map overlay
     xyz_full_aligned = (R @ xyz_est.T).T + t_vec
-    make_map_plot(xyz_full_aligned, lat0, lon0, alt0, t_gt_matched, lats_gt_matched, lons_gt_matched, prefix, label)
+    make_map_plot(xyz_full_aligned, lat0, lon0, alt0, t_gt_matched, lats_gt_matched, lons_gt_matched, args.prefix, args.label)
 
 
 if __name__ == "__main__":
