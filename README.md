@@ -42,7 +42,8 @@ After pre-processing, the system is deployed using a containerized **ROS Melodic
 flowchart TD
     subgraph Data Input
         B1[(Raw ROS 2 Bag)] -->|Extract Binaries| conv(convert_bag.py)
-        conv -->|Standard ROS msgs| P1(fix_ouster_bag.py)
+        conv -->|Convert bag from ros2 to ros1| conv2(rosbags-convert)
+        conv2 -->|Standard ROS msgs| P1(fix_ouster_bag.py)
         P1 -->|Repaired Timestamps| B2[(lio_sam_ready.bag)]
     end
 
