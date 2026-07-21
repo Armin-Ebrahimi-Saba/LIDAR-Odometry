@@ -20,6 +20,7 @@ scripts/*
 !scripts/run_lio_sam.sh
 !scripts/run_lio_sam_gnss.sh
 !scripts/patch_yaml.py
+!scripts/patch.py
 !scripts/format_slam_output.py
 
 # Python environments / cache

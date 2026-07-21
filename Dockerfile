@@ -6,9 +6,9 @@ COPY scripts/patch.py /patch.py
 # GTSAM was built without AVX, while LIO-SAM was built with -march=native (AVX).
 # This causes Eigen ABI mismatch (16-byte vs 32-byte alignment). We remove -march=native.
 # We also remove the dense format check which crashes/spams on Ouster data (which inherently has NaNs).
-# Install gdb for debugging
+# Install gdb for debugging and mesa drivers for RViz software rendering
 RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F42ED6FBAB17C654 && \
-    apt-get update && apt-get install -y gdb
+    apt-get update && apt-get install -y gdb libgl1-mesa-glx libgl1-mesa-dri
 
 RUN cd /root/workspace/src/LIO_SAM_6AXIS/LIO-SAM-6AXIS && \
     sed -i 's/ROS_ERROR("Point cloud is not in dense format, please remove NaN points first!");/\/\/ ROS_ERROR.../g' src/imageProjection.cpp && \

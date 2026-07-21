@@ -8,7 +8,6 @@ services:
       - DISPLAY=host.docker.internal:0.0
       - QT_X11_NO_MITSHM=1
       - LIBGL_ALWAYS_INDIRECT=0
-      - LIBGL_ALWAYS_SOFTWARE=1
       - USE_GNSS=${USE_GNSS:-false}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
