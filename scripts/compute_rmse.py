@@ -18,26 +18,59 @@ from utils import (load_glim_traj, load_gnss, latlon_to_local_enu,
                     local_enu_to_latlon, compute_alignment)
 
 
-def make_plots(t_matched, errors, src_aligned, dst, prefix, label):
+def make_plots(t_matched, errors, src, src_aligned, dst, prefix, label):
 
     t_rel = t_matched - t_matched[0]
     rmse = np.sqrt(np.mean(errors ** 2))
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
+    # ------------------------------------------------------------
+    # Error plot
+    # ------------------------------------------------------------
     axes[0].plot(t_rel, errors)
-    axes[0].axhline(rmse, color='r', linestyle='--', label=f'RMSE = {rmse:.2f} m')
+    axes[0].axhline(rmse, color='r', linestyle='--',
+                    label=f'RMSE = {rmse:.2f} m')
     axes[0].set_xlabel('Time [s]')
     axes[0].set_ylabel('Position error [m]')
-    axes[0].set_title(f'Absolute Trajectory Error over time{" - " + label if label else ""}')
+    axes[0].set_title(
+        f'Absolute Trajectory Error over time{" - " + label if label else ""}')
     axes[0].legend()
     axes[0].grid(True)
 
-    axes[1].plot(dst[:, 0], dst[:, 1], 'g-', label='GNSS ground truth', linewidth=2)
-    axes[1].plot(src_aligned[:, 0], src_aligned[:, 1], 'b--', label='GLIM (aligned)', linewidth=1.5)
+    # ------------------------------------------------------------
+    # Top-down trajectory plot
+    # ------------------------------------------------------------
+    axes[1].plot(
+        dst[:, 0], dst[:, 1],
+        'g-',
+        linewidth=2,
+        label='GNSS ground truth'
+    )
+
+    axes[1].plot(
+        src[:, 0], src[:, 1],
+        'r:',
+        linewidth=1.5,
+        label='GLIM (raw)'
+    )
+
+    axes[1].plot(
+        src_aligned[:, 0], src_aligned[:, 1],
+        'b--',
+        linewidth=1.5,
+        label='GLIM (aligned)'
+    )
+
+    # Optional: highlight start positions
+    axes[1].scatter(dst[0,0], dst[0,1], color='green', marker='*', s=120)
+    axes[1].scatter(src[0,0], src[0,1], color='red', marker='o', s=70)
+    axes[1].scatter(src_aligned[0,0], src_aligned[0,1], color='blue', marker='x', s=90)
+
     axes[1].set_xlabel('East [m]')
     axes[1].set_ylabel('North [m]')
-    axes[1].set_title(f'Trajectory comparison (top-down){" - " + label if label else ""}')
+    axes[1].set_title(
+        f'Trajectory comparison (top-down){" - " + label if label else ""}')
     axes[1].legend()
     axes[1].axis('equal')
     axes[1].grid(True)
@@ -116,6 +149,12 @@ def main():
     t_est, xyz_est = load_glim_traj(traj_path)
     t_gt, lats, lons, alts = load_gnss(gnss_path)
 
+    # Correcting the timestamp offset between rosbag and GNSS
+    offset = t_est[0] - t_gt[0]
+    t_gt = t_gt + offset
+    print(f"Applied GNSS timestamp offset: {offset}s")
+    print(f"Corrected GNSS range: {t_gt[0]:.3f} -> {t_gt[-1]:.3f}")
+
     print(f"GLIM trajectory: {len(t_est)} poses, {t_est[0]:.3f} -> {t_est[-1]:.3f} "
           f"({t_est[-1]-t_est[0]:.1f}s processed)")
     print(f"GNSS ground truth: {len(t_gt)} fixes, {t_gt[0]:.3f} -> {t_gt[-1]:.3f} "
@@ -127,13 +166,59 @@ def main():
     R, t_vec, matches = compute_alignment(t_est, xyz_est, t_gt, xyz_gt)
     print(f"Matched {len(matches)} / {len(t_est)} GLIM poses (within 0.1s)")
 
+    #####################DEBUGGING######################
+    print("\nMATCH DEBUG")
+    print("First 10 matches:")
+    for m in matches[:10]: print(m, "GLIM:", t_est[m[0]], "GNSS:", t_gt[m[1]], "dt:", t_est[m[0]]-t_gt[m[1]])
+    print("\nLast match:")
+    m = matches[-1]
+    print(m, "GLIM:", t_est[m[0]], "GNSS:", t_gt[m[1]], "dt:", t_est[m[0]]-t_gt[m[1]])
+    ####################################################
+
     idx_est = [m[0] for m in matches]
     idx_gt = [m[1] for m in matches]
     src = xyz_est[idx_est]
     dst = xyz_gt[idx_gt]
+
+    ###################DEBUGGING#######################
+    print("\nENDPOINT DEBUG")
+    print("GLIM start:", src[0])
+    print("GNSS start:", dst[0])
+    print("GLIM end:", src[-1])
+    print("GNSS end:", dst[-1])
+    print("Raw endpoint distance:")
+    print(np.linalg.norm(src[-1]-dst[-1]))
+    ###################################################
+
     t_matched = t_est[idx_est]
 
+    ###################DEBUGGING######################
+    print("\nCHECK RAW TRAJECTORY")
+    print("First matched GLIM:", src[0])
+    print("First matched GNSS:", dst[0])
+    print("Distance:", np.linalg.norm(src[0]-dst[0]))
+    print("First matched GNSS index:", idx_gt[0])
+    print("Last matched GNSS index:", idx_gt[-1])
+    ##################################################
+
     src_aligned = (R @ src.T).T + t_vec
+
+    #######################DEBUGGING#########################
+    print("\nALIGNMENT DEBUG")
+    print("Rotation:")
+    print(R)
+    print("\nTranslation:")
+    print(t_vec)
+    print("\nStart before alignment:")
+    print(src[0])
+    print("\nStart after alignment:")
+    print(src_aligned[0])
+    print("GNSS start:")
+    print(dst[0])
+    print("Start error after alignment:")
+    print(np.linalg.norm(src_aligned[0]-dst[0]))
+    #########################################################
+
     errors = np.linalg.norm(src_aligned - dst, axis=1)
 
     t_gt_matched = t_gt[idx_gt]
@@ -158,7 +243,7 @@ def main():
                header="timestamp,est_x,est_y,est_z,gt_x,gt_y,gt_z", delimiter=",", comments="")
     print(f"\nSaved: {prefix}_errors.csv, {prefix}_aligned_trajectory.csv")
 
-    make_plots(t_matched, errors, src_aligned, dst, prefix, label)
+    make_plots(t_matched, errors, src, src_aligned, dst, prefix, label)
 
     # Full (not just matched) GLIM trajectory, aligned, for a smoother map overlay
     xyz_full_aligned = (R @ xyz_est.T).T + t_vec

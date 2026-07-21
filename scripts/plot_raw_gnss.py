@@ -18,6 +18,8 @@ def main():
     interval = float(sys.argv[3]) if len(sys.argv) > 3 else 100.0
 
     t_gt, lats, lons, alts = load_gnss(gnss_path)
+    offset = 170.90881991386414 ######
+    t_gt = t_gt + offset ######
     lat0, lon0, alt0 = lats[0], lons[0], alts[0]
     xyz = latlon_to_local_enu(lats, lons, alts, lat0, lon0, alt0)
 

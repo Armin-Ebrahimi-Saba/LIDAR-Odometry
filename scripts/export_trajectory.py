@@ -39,6 +39,10 @@ def main():
 
     t_gt, lats, lons, alts = load_gnss(gnss_path)
 
+    offset = t_est[0] - t_gt[0]
+    t_gt = t_gt + offset
+    print(f"Applied GNSS offset: {offset:.3f}s")
+
     lat0, lon0, alt0 = lats[0], lons[0], alts[0]
 
     xyz_gt = latlon_to_local_enu(lats, lons, alts, lat0, lon0, alt0)
