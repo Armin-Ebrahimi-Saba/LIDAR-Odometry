@@ -75,19 +75,19 @@ Follow these steps to run the SLAM pipeline on your machine:
    Execute the conversion and synchronization:
    ```bash
    python3 bag_preparation/convert_bag.py
+   rosbags-convert bags/rosbag_new --dst bags/rosbag_new.bag
    python3 bag_preparation/fix_ouster_bag.py
    ```
    This will output a final, synchronized ROS 1 bag named `lio_sam_ready.bag` inside your `bags/` directory.
-2. **Start the SLAM Node**: Depending on whether you want to use GNSS fusion, execute one of the launch scripts from your terminal:
-   - For LiDAR + IMU only:
-     ```bash
-     bash scripts/run_lio_sam.sh
-     ```
-   - For LiDAR + IMU + GNSS:
-     ```bash
-     bash scripts/run_lio_sam_gnss.sh
-     ```
-3. **Wait for Completion**: The script will launch a Docker container, configure LIO-SAM dynamically, play the bag file, and process the data. 
+2. **Start the SLAM Node**: Start the container using Docker Compose. By default, it runs without GNSS data:
+   ```bash
+   docker-compose up
+   ```
+   If you want to enable GNSS fusion (make sure you converted the bags with the GNSS scripts first!), run it with the `USE_GNSS` environment variable set:
+   ```bash
+   USE_GNSS=true docker-compose up
+   ```
+3. **Wait for Completion**: Docker Compose will launch the container, configure LIO-SAM dynamically, play the bag file, and process the data. 
 4. **Output Generation**: Once finished, the pipeline automatically processes the results and saves them in the `output/maps/` directory. You will find exactly two files for each run:
    - `map3d.pcd`: The generated 3D point cloud map.
    - `SLAM_path.csv`: The converted 2D trajectory (Lat/Lon) and velocity data.

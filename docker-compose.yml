@@ -9,13 +9,13 @@ services:
       - QT_X11_NO_MITSHM=1
       - LIBGL_ALWAYS_INDIRECT=0
       - LIBGL_ALWAYS_SOFTWARE=1
+      - USE_GNSS=${USE_GNSS:-false}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - .:/workspace
       - ./src/simpleGpsOdom_patched.cpp:/root/workspace/src/LIO_SAM_6AXIS/LIO-SAM-6AXIS/src/simpleGpsOdom.cpp:ro
       - ./src/LIO-SAM-6AXIS-src/mapOptmizationGps.cpp:/root/workspace/src/LIO_SAM_6AXIS/LIO-SAM-6AXIS/src/mapOptmizationGps.cpp:ro
     working_dir: /workspace
-    # To run without GNSS (default):
-    # command: /bin/zsh -c "./run_lio_sam.sh"
-    # To run WITH GNSS (make sure you converted the bags with the GNSS scripts first!):
-    command: /bin/zsh -c "source /opt/ros/melodic/setup.zsh && cd /root/workspace && catkin build && source devel/setup.zsh && cd /workspace && ./scripts/run_lio_sam_gnss.sh"
+    # To run without GNSS (default): docker-compose up
+    # To run WITH GNSS: USE_GNSS=true docker-compose up
+    command: /bin/zsh -c "source /opt/ros/melodic/setup.zsh && cd /root/workspace && catkin build && source devel/setup.zsh && cd /workspace && if [ \"$$USE_GNSS\" = \"true\" ]; then ./scripts/run_lio_sam_gnss.sh; else ./scripts/run_lio_sam.sh; fi"

@@ -13,8 +13,8 @@ Quaternion = store.types['geometry_msgs/msg/Quaternion']
 NavSatFix = store.types['sensor_msgs/msg/NavSatFix']
 NavSatStatus = store.types['sensor_msgs/msg/NavSatStatus']
 
-inbag_path = Path('./rosbag')
-outbag_path = Path('./rosbag_new')
+inbag_path = Path('./bags/rosbag')
+outbag_path = Path('./bags/rosbag_new')
 
 if outbag_path.exists():
     import shutil

@@ -5,8 +5,8 @@ from rosbags.typesys import get_typestore, Stores
 import sys
 
 def main():
-    inbag_path = Path('rosbag_new.bag')
-    outbag_path = Path('lio_sam_ready.bag')
+    inbag_path = Path('bags/rosbag_new.bag')
+    outbag_path = Path('bags/lio_sam_ready.bag')
 
     if not inbag_path.exists():
         print(f"Error: {inbag_path} not found.")
