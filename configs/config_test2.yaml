@@ -1,0 +1,144 @@
+paths:
+  # Test2 rosbag (separate recording from Test1's ./data/test1/rosbag).
+  bag_dir: "./data/test2/rosbag"
+
+  # Folder containing the individual cloud_##########.laz files
+  laz_dir: "./data/test2/rosbag/rosbag_data/laz_clouds"
+
+  # Corrected GNSS reference trajectory (ground truth). ONE file covers both
+  # datasets; it is cropped to the run window below. Note this file ends at
+  # ~1780398777.8, i.e. it only covers roughly the first ~450 s of the Test2
+  # window, so evaluation is against that portion of the run.
+  gnss_csv: "./data/xtrack_gnss_corrected/xtrack_global_position_t12.csv"
+
+  # Where all pipeline outputs for this run get written
+  output_dir: "./outputs/test2"
+
+run:
+  name: "Test2"
+  lidar_topic: "/ouster/points"
+  # Test2 window (bag starts 1780398327.531873, duration 601.8 s).
+  #   Inventory-report windows (for reference):
+  #     Test1: 1780397390.972 -> 1780398213.329
+  #     Test2: 1780398327.532 -> 1780398929.389
+  start_time: 1780398100.801
+  end_time: 1780398520.389
+  # Closed range of scan indices to process (frame_end inclusive; null = until
+  # the last scan). Test2 has 6,008 scans. Overridden by `--frames START END`.
+  frame_start: 0
+  frame_end: null
+  # Legacy: first-N-scans cap, used only when frame_end is null
+  # (frame_end = frame_start + max_frames - 1). Prefer frame_start/frame_end.
+  max_frames: 6008
+
+lidar:
+  # Where odometry reads scans from:
+  #   "laz" -- the exported cloud_*.laz files (no per-point time -> no deskew)
+  #   "bag" -- stream /ouster/points from the bag directly. The raw PointCloud2
+  #            carries per-point sweep time in its `timeoffset` field (the .laz
+  #            export dropped it), so this is required for KISS-ICP deskew to do
+  #            anything (kiss_icp.data.deskew below).
+  source: "bag"
+
+  # Take the Pixhawk coordinate system (FRD: X-forward, Y-right, Z-down) as the
+  # body frame and express LiDAR scans in it, so the clouds share the PX4
+  # attitude's convention (needed for correct attitude deskew / fusion). The
+  # default LiDAR->body rotation assumes the Ouster (FLU: X-fwd, Y-left, Z-up) is
+  # mounted axis-aligned with the Pixhawk, so only the axis convention differs
+  # (180 deg about X). Set extrinsic_rpy_deg (intrinsic xyz, degrees) to the true
+  # mounting rotation if known. See sensys_slam/frames.py.
+  body_frame: true
+  extrinsic_rpy_deg: null   # null -> use the FLU->FRD convention default
+
+  # Optional: deskew each sweep with measured PX4 attitude
+  # (/fmu/out/vehicle_attitude, ~100 Hz) instead of KISS-ICP's constant-velocity
+  # model. Corrects only the rotational distortion; requires source: bag. When
+  # true, KISS-ICP's own deskew (kiss_icp.data.deskew) is forced off.
+  # Note /ouster/imu_att is all-identity in this bag and cannot be used.
+  imu_deskew: true
+  attitude_topic: "/fmu/out/vehicle_attitude"
+
+kiss_icp:
+  data:
+    max_range: 40.0       # meters; tune down if you see far-away outliers in the map
+    min_range: 5        # meters; filters out points too close to the sensor body
+    deskew: true          # KISS-ICP constant-velocity deskew. Needs per-point time
+                           # -> requires lidar.source: bag above (the .laz files have
+                           # an all-zero gps_time and cannot deskew).
+
+  mapping:
+    voxel_size: 1            # null = auto (max_range / 100), per KISS-ICP's own heuristic
+                             # ODOMETRY knob: drives registration + KISS-ICP's local
+                             # map. Lowering it re-tunes the SLAM (and slows it down).
+    max_points_per_voxel: 50    # local-map density cap per voxel. Affects KISS-ICP's
+                             # internal local map only -- NOT map_local.pcd.
+    # DELIVERABLE knob, decoupled from voxel_size above: resolution (m) of the
+    # accumulated map_local.pcd only. Exactly one point survives per cell, so
+    # this is the hard ceiling on map density -- lower it for a denser map, at
+    # the cost of file size. null = fall back to voxel_size.
+    map_voxel_size: 0.7
+
+  registration:
+    max_num_iterations: 400       # ICP iterations per scan before giving up
+    convergence_criterion: 0.0001 # stop ICP once the pose update drops below this
+    max_num_threads: 0            # 0 = automatic (use all available cores)
+
+  adaptive_threshold:
+    fixed_threshold: null   # set a float to DISABLE the adaptive threshold and use this
+                             # constant correspondence threshold instead (advanced.yaml)
+    initial_threshold: 3.0  # starting data-association threshold (used when adaptive)
+    min_motion_th: 0.1      # minimum motion (m) before the threshold adapts
+
+ground_truth:
+  require_lat_lon_valid: true   # drop rows where lat_lon_valid == False, if column exists
+  require_alt_valid: true       # drop rows where alt_valid == False, if column exists
+  crop_margin_s: 0.0             # extra seconds to trim beyond start/end if you still see
+                                  # edge jumps in the error plot after the basic crop
+
+alignment:
+  # Which fit georeferences the odometry onto the GNSS ENU frame (both are least
+  # squares with scale fixed to 1, both eph-weighted, both use time_match below):
+  #   "anchored" -- pin the start to the first ground-truth row and fit ONLY the
+  #                 rotation about that anchor, so the two tracks start at the
+  #                 same point and drift is exposed rather than re-centred away.
+  #   "umeyama"  -- classic global rigid fit with a FREE translation. Lower fit
+  #                 RMSE (it spreads the residual over the whole track) but the
+  #                 start no longer coincides with the GT, and the number is not
+  #                 comparable to the anchored one.
+  method: "anchored"
+  # How SLAM poses are matched to GT samples:
+  #   "absolute"     -- nearest shared-clock timestamp within max_time_diff_s.
+  #   "relative"     -- clocks don't share an epoch but do share a start and a
+  #                     rate: shift scan times by the constant offset that makes
+  #                     the two FIRST samples coincide, then match by elapsed
+  #                     time within max_time_diff_s. No stretch, so scans past
+  #                     the end of the GT window are dropped unmatched. Needs the
+  #                     two streams to start moving together -- see the README:
+  #                     on Test1 they do not, and this mode does badly.
+  #   "proportional" -- clocks don't share an epoch; runs correspond end-to-end
+  #                     (first scan <-> first GT row, last <-> last). Scan times
+  #                     are remapped onto the GT span by run fraction, then matched.
+  #   "arclength"    -- like proportional, but match by fraction of distance
+  #                     travelled, not time. Robust when the LiDAR dwells at the
+  #                     start longer than the GT window does (the stationary head
+  #                     otherwise pairs parked scans with GT that already moved).
+  time_match: "arclength"
+  max_time_diff_s: 0.10   # (absolute/relative modes) max gap allowed when matching
+  # Weight matched pairs by the GNSS solution's own uncertainty when fitting the
+  # georeference and computing RMSE: weight = 1 / max(eph, eph_floor_m)^2, using
+  # PX4's per-sample horizontal error `eph` (m, 1-sigma) from the ground-truth
+  # CSV. Down-weights the several-metre position wander during GNSS
+  # initialisation (where eph is worst) instead of letting it inflate the error.
+  # Set false to weight every matched sample equally (raw RMSE only).
+  eph_weighting: true
+  eph_floor_m: 0.3        # clamp eph below this (m) so one over-confident sample
+                           # can't dominate; ~ the best eph seen in this dataset
+
+velocity:
+  smooth_window: 1       # odd window length (samples) for position smoothing before
+                            # differentiating; set to 0 to differentiate raw positions
+  smooth_polyorder: 2
+
+evaluation:
+  plot_title: "Test2 -- LiDAR Odometry vs GNSS Ground Truth"
+  time_tick_s: 0     # put a time marker on the trajectory plot every N seconds (0 = off)

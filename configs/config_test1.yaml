@@ -1,0 +1,134 @@
+paths:
+  # Folder containing metadata.yaml + rosbag_0.db3 (and rosbag_data/ alongside
+  # it). Per your tree, that's the rosbag/ folder directly -- NOT the
+  # "Location Person GNSS" subfolder, which is a separate, unrelated GNSS
+  # export (not used by this pipeline; ground truth comes from
+  # xtrack_gnss_corrected/ instead).
+  bag_dir: "./data/test1/rosbag"
+
+  # Folder containing the individual cloud_##########.laz files
+  laz_dir: "./data/test1/rosbag/rosbag_data/laz_clouds"
+
+  # Corrected GNSS reference trajectory (ground truth)
+  gnss_csv: "./data/xtrack_gnss_corrected/xtrack_global_position_t12.csv"
+
+  # Where all pipeline outputs for this run get written
+  output_dir: "./outputs/test1"
+
+run:
+  name: "Test1"
+  lidar_topic: "/ouster/points"
+  # Run time window in Unix epoch seconds. Test1 is defined here as the FIRST
+  # 820 s of the GNSS file (first sample 1780397225.801 + 820 s). The LiDAR
+  # stream (/ouster/points) only starts at 1780397393.674, ~168 s into this
+  # window, so the extra leading GNSS rows simply have no LiDAR match.
+  #   Inventory-report windows (for reference):
+  #     Test1: 1780397390.972 -> 1780398213.329
+  #     Test2: 1780398327.532 -> 1780398929.389
+  start_time: 1780397225.801
+  end_time: 1780397940.801
+  # Closed range of scan indices to process (frame_end inclusive; null = until
+  # the last scan). Test1 has 8,194 scans. Overridden by `--frames START END`.
+  frame_start: 0
+  frame_end: null
+  # Legacy: first-N-scans cap, used only when frame_end is null
+  # (frame_end = frame_start + max_frames - 1). Prefer frame_start/frame_end.
+  max_frames: 8194 # max:  8,194-frame
+
+lidar:
+  # Where odometry reads scans from:
+  #   "laz" -- the exported cloud_*.laz files (no per-point time -> no deskew)
+  #   "bag" -- stream /ouster/points from the bag directly. The raw PointCloud2
+  #            carries per-point sweep time in its `timeoffset` field (the .laz
+  #            export dropped it), so this is required for KISS-ICP deskew to do
+  #            anything (kiss_icp.data.deskew below).
+  source: "bag"
+
+  # Take the Pixhawk coordinate system (FRD: X-forward, Y-right, Z-down) as the
+  # body frame and express LiDAR scans in it, so the clouds share the PX4
+  # attitude's convention (needed for correct attitude deskew / fusion). The
+  # default LiDAR->body rotation assumes the Ouster (FLU: X-fwd, Y-left, Z-up) is
+  # mounted axis-aligned with the Pixhawk, so only the axis convention differs
+  # (180 deg about X). Set extrinsic_rpy_deg (intrinsic xyz, degrees) to the true
+  # mounting rotation if known. See sensys_slam/frames.py.
+  body_frame: true
+  extrinsic_rpy_deg: null   # null -> use the FLU->FRD convention default
+
+  # Optional: deskew each sweep with measured PX4 attitude
+  # (/fmu/out/vehicle_attitude, ~100 Hz) instead of KISS-ICP's constant-velocity
+  # model. Corrects only the rotational distortion; requires source: bag. When
+  # true, KISS-ICP's own deskew (kiss_icp.data.deskew) is forced off.
+  # Note /ouster/imu_att is all-identity in this bag and cannot be used.
+  imu_deskew: true
+  attitude_topic: "/fmu/out/vehicle_attitude"
+
+kiss_icp:
+  data:
+    max_range: 40.0       # meters; tune down if you see far-away outliers in the map
+    min_range: 5        # meters; filters out points too close to the sensor body
+    deskew: true          # KISS-ICP constant-velocity deskew. Needs per-point time
+                           # -> requires lidar.source: bag above (the .laz files have
+                           # an all-zero gps_time and cannot deskew).
+
+  mapping:
+    voxel_size: 1            # null = auto (max_range / 100), per KISS-ICP's own heuristic
+                             # ODOMETRY knob: drives registration + KISS-ICP's local
+                             # map. Lowering it re-tunes the SLAM (and slows it down).
+    max_points_per_voxel: 50    # local-map density cap per voxel. Affects KISS-ICP's
+                             # internal local map only -- NOT map_local.pcd.
+    # DELIVERABLE knob, decoupled from voxel_size above: resolution (m) of the
+    # accumulated map_local.pcd only. Exactly one point survives per cell, so
+    # this is the hard ceiling on map density -- lower it for a denser map, at
+    # the cost of file size. null = fall back to voxel_size.
+    map_voxel_size: 0.7
+
+  registration:
+    max_num_iterations: 400       # ICP iterations per scan before giving up
+    convergence_criterion: 0.0001 # stop ICP once the pose update drops below this
+    max_num_threads: 0            # 0 = automatic (use all available cores)
+
+  adaptive_threshold:
+    fixed_threshold: null   # set a float to DISABLE the adaptive threshold and use this
+                             # constant correspondence threshold instead (advanced.yaml)
+    initial_threshold: 3.0  # starting data-association threshold (used when adaptive)
+    min_motion_th: 0.1      # minimum motion (m) before the threshold adapts
+
+ground_truth:
+  require_lat_lon_valid: true   # drop rows where lat_lon_valid == False, if column exists
+  require_alt_valid: true       # drop rows where alt_valid == False, if column exists
+  crop_margin_s: 0.0             # extra seconds to trim beyond start/end if you still see
+                                  # edge jumps in the error plot after the basic crop
+
+alignment:
+  # The odometry is georeferenced onto the GNSS ENU frame by pinning its start to
+  # the first ground-truth row and fitting ONLY the rotation about that anchor
+  # (least squares, scale fixed to 1), so the two tracks start at the same point.
+  # How SLAM poses are matched to GT samples:
+  #   "absolute"     -- nearest shared-clock timestamp within max_time_diff_s.
+  #   "proportional" -- clocks don't share an epoch; runs correspond end-to-end
+  #                     (first scan <-> first GT row, last <-> last). Scan times
+  #                     are remapped onto the GT span by run fraction, then matched.
+  #   "arclength"    -- like proportional, but match by fraction of distance
+  #                     travelled, not time. Robust when the LiDAR dwells at the
+  #                     start longer than the GT window does (the stationary head
+  #                     otherwise pairs parked scans with GT that already moved).
+  time_match: "arclength"
+  max_time_diff_s: 0.15   # (absolute mode only) max gap allowed when matching
+  # Weight matched pairs by the GNSS solution's own uncertainty when fitting the
+  # georeference and computing RMSE: weight = 1 / max(eph, eph_floor_m)^2, using
+  # PX4's per-sample horizontal error `eph` (m, 1-sigma) from the ground-truth
+  # CSV. Down-weights the several-metre position wander during GNSS
+  # initialisation (where eph is worst) instead of letting it inflate the error.
+  # Set false to weight every matched sample equally (raw RMSE only).
+  eph_weighting: true
+  eph_floor_m: 0.3        # clamp eph below this (m) so one over-confident sample
+                           # can't dominate; ~ the best eph seen in this dataset
+
+velocity:
+  smooth_window: 1       # odd window length (samples) for position smoothing before
+                            # differentiating; set to 0 to differentiate raw positions
+  smooth_polyorder: 2
+
+evaluation:
+  plot_title: "Test1 -- LiDAR Odometry vs GNSS Ground Truth"
+  time_tick_s: 0     # put a time marker on the trajectory plot every N seconds (0 = off)

@@ -1,0 +1,20 @@
+# Core pipeline
+numpy
+scipy
+pandas
+pyyaml
+tqdm
+
+# LiDAR / point cloud
+laspy[lazrs]        # .laz reading (lazrs backend avoids needing a system LASzip install)
+open3d               # .pcd map export
+kiss-icp             # odometry engine (PRBonn, https://github.com/PRBonn/kiss-icp)
+
+# ROS2 bag reading without ROS2 installed
+rosbags
+
+# Geodesy
+pymap3d               # geodetic <-> ENU conversions
+
+# Plotting
+matplotlib
