@@ -92,8 +92,8 @@ Follow these steps to run the SLAM pipeline on your machine:
    ```bash
    USE_GNSS=true docker-compose up
    ```
-5.1 **Wait for Completion**: Docker Compose will launch the container, configure LIO-SAM dynamically, play the bag file, and process the data. 
-5.2 **Output Generation**: Once finished, the pipeline automatically processes the results and saves them in the `output/maps/` directory. You will find exactly two files for each run:
+6. **Wait for Completion**: Docker Compose will launch the container, configure LIO-SAM dynamically, play the bag file, and process the data. 
+7. **Output Generation**: Once finished, the pipeline automatically processes the results and saves them in the `output/maps/` directory. You will find exactly two files for each run:
    - `map3d.pcd`: The generated 3D point cloud map.
    - `SLAM_path.csv`: The converted 2D trajectory (Lat/Lon) and velocity data.
 
@@ -146,7 +146,7 @@ The final evaluation was conducted using custom Python scripts running outside o
 
 ### 3.2 Findings
 
-<img width="8" height="6" alt="xtrack_turn" src="https://github.com/user-attachments/assets/ab03ff8f-522e-4d7b-a0c1-98abcd55d8d4" />
+<img width="80" height="60" alt="xtrack_turn" src="https://github.com/user-attachments/assets/ab03ff8f-522e-4d7b-a0c1-98abcd55d8d4" />
 **Impact of GNSS Data on Mapping Accuracy**
 
 Comparing the generated point clouds (as seen in the visualization above) reveals a significant difference in map consistency when GNSS data is omitted, particularly during high-dynamic maneuvers:
