@@ -65,7 +65,11 @@ flowchart TD
 ### 1.4 Run guide
 Follow these steps to run the SLAM pipeline on your machine:
 
-1. **Prepare the Data**: Start by placing your raw ROS 2 bag folder/files into the `bags/` directory. Then, run the pre-processing scripts from the `bag_preparation/` folder to convert the ROS 2 messages to ROS 1 and synchronize the Ouster timestamps.
+1. **Check requirements**:
+    ```bash
+   pip install -r requirements.txt
+   ```
+2. **Prepare the Data**: Start by placing your raw ROS 2 bag folder/files into the `bags/` directory. Then, run the pre-processing scripts from the `bag_preparation/` folder to convert the ROS 2 messages to ROS 1 and synchronize the Ouster timestamps.
    ```text
    .
    ├── bags/
@@ -78,7 +82,9 @@ Follow these steps to run the SLAM pipeline on your machine:
    python3 bag_preparation/fix_ouster_bag.py
    ```
    This will output a final, synchronized ROS 1 bag named `lio_sam_ready.bag` inside your `bags/` directory.
-2. **Start the SLAM Node**: Start the container using Docker Compose. By default, it runs without GNSS data:
+3. **Start Docker locally**: Start up docker desktop.
+4. **Start Xlaunch**: For a live feed of the map creation, you have to start a program enabaling Docker to show Rviz on the host machine. (Ideally XLaunch)
+5. **Start the SLAM Node**: Start the container using Docker Compose. By default, it runs without GNSS data:
    ```bash
    docker-compose up
    ```
@@ -146,7 +152,7 @@ The final evaluation was conducted using custom Python scripts running outside o
 
 ### 3.2 Findings
 
-<img width="8" height="6" alt="xtrack_turn" src="https://github.com/user-attachments/assets/ab03ff8f-522e-4d7b-a0c1-98abcd55d8d4" />
+<img width="80" height="60" alt="xtrack_turn" src="https://github.com/user-attachments/assets/ab03ff8f-522e-4d7b-a0c1-98abcd55d8d4" />
 **Impact of GNSS Data on Mapping Accuracy**
 
 Comparing the generated point clouds (as seen in the visualization above) reveals a significant difference in map consistency when GNSS data is omitted, particularly during high-dynamic maneuvers:
