@@ -272,7 +272,7 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
   <em>Generated map of run2 in top-down view (colored height map)</em>
 </p>
 
-[![Run 2 demonstration](https://img.youtube.com/vi/https://youtu.be/Zj0wIe6S0uo/maxresdefault.jpg)](https://youtu.be/Zj0wIe6S0uo)
+[![Run 2 demonstration](https://img.youtube.com/vi/Zj0wIe6S0uo/maxresdefault.jpg)](https://www.youtube.com/watch?v=Zj0wIe6S0uo)
 
 ## Technical Analysis of Error Curve Dynamics
 As seen in the figures before, the positional error exhibits possible specific behaviors:
