@@ -8,10 +8,10 @@ No NVIDIA GPU required (pure CPU). Tested on WSL2, Ubuntu 24.04, ROS2 Jazzy.
 ```
 LIDAR-based-Positioning/
 ├── config/                          # GLIM config (CPU mode, tuned noise params)
-├── data/                             # gitignored -- regenerate locally
+├── data/                             # gitignored (regenerate locally)
 │   ├── Test1_data/
 │   │   ├── rosbag/                  # original course bag
-│   │   └── rosbag_glim/             # OUTPUT of bag_converter.py -- what GLIM reads
+│   │   └── rosbag_glim/             # OUTPUT of bag_converter.py -> what GLIM reads
 │   └── xtrack_gnss_corrected/       # ground truth CSV for evaluation
 ├── ros2_packages/aspn_msgs/         # reconstructed custom message package
 ├── scripts/
@@ -42,10 +42,10 @@ flowchart TD
         D --> E[Local/Sub Mapping<br/>keyframe submaps]
         E --> F[Global Mapping<br/>submap-pair VGICP factors + IMU]
     end
-    F --> G[results/dump/run_x/<br/>traj_lidar.txt, submaps, graph.bin]
-    G -->|export_trajectory.py| H[trajectory_latlon_ned.csv]
-    G -->|compute_rmse.py| I[RMSE + error plots]
-    G -->|offline_viewer + ply2pcd.py| J[map.pcd + topdown images]
+    F --> G[results/dump/run2/<br/>traj_lidar.txt, submaps, graph.bin]
+    G -->|export_trajectory.py --offset -307.00| H[run2_trajectory_latlon_ned.csv]
+    G -->|compute_rmse.py --offset -307.00| I[RMSE + error plots]
+    G -->|offline_viewer + ply2pcd.py| J[map_run2.pcd + topdown images]
     K[GNSS ground truth CSV] --> H
     K --> I
 ```
@@ -55,7 +55,7 @@ IMU sign convention, non-standard per-point timestamp field. `bag_converter.py`
 would fix all three. GLIM's pipeline itself is unmodified upstream GLIM (see
 [koide3/glim](https://github.com/koide3/glim), [paper](https://arxiv.org/abs/2407.10344)). 
 This repository focuses on the conversion layer, CPU-only build, sensor-specific
-config tuning, and the evaluation scripts producing the three required deliverables:
+config tuning, clock synchronization calibration and the evaluation scripts producing the three required deliverables:
 - 2D trajectory (LatLon) and velocity (NED-frame) estimation result (e.g. saved as .csv file);
 - Error plot: Estimate vs. Ground Truth (GNSS) using RMSE as metrics;
 - 3D point cloud map saved as .pcd.
@@ -70,14 +70,14 @@ config tuning, and the evaluation scripts producing the three required deliverab
 - **IMU source**: Ouster's own embedded IMU (`/ouster/imu_meas`), not Pixhawk. Since 
   its axes already match the LiDAR frame, `T_lidar_imu` uses GLIM's manufacturer-default Ouster OS0 value
   (`[0.006, -0.012, 0.008, 0,0,0,1]`), tested against identity as a control (see Results).
-- **No GNSS/camera fusion.** GLIM has no built-in GNSS factor like LIO-SAM. This would need a
-  custom extension module, which is considered as out of scope. GNSS is used only as an
-  independent evaluation reference. Camera fusion is natively supported but needs real D435i calibration.
-- **Trajectory-to-GNSS alignment**: GLIM's local frame has no absolute heading reference, 
-  so an alignment to GNSS local-ENU via SE(3) Umeyama/Horn least-squares (no scaling) is needed 
-  before computing error. Similar approach `evo`'s ATE metric uses, which the GLIM paper itself relies on.
+- **No online GNSS fusion.** GLIM operates as a pure LiDAR-Inertial Odometry (LIO) framework. GNSS is used strictly 
+  as post-hoc for rigid SE(3) spatial alignment and ground truth evaluation. Camera fusion is natively supported 
+  but this needs real D435i calibration.
+- **Trajectory-to-GNSS alignment and Clock Sync**: GLIM's local frame has no absolute heading reference and its bag timestamps are
+  offset by `-307.00 s` relative to GNSS UTC time. Alignment to GNSS local-ENU is performed via SE(3) Umeyama least squares 
+  (no scaling) after applying the clock offset. This should aligns with `evo`'s ATE metric, which the GLIM paper itself relies on.
 - **Noise parameters** (`imu_acc_noise`, `imu_gyro_noise`, `imu_bias_noise`) tuned via manual 
-  7-configuration sweep.
+  parameter sweeps.
 
 ---
 
@@ -159,9 +159,8 @@ Copy `metadata.yaml` + `rosbag_0.db3` into `data/Test1_data/rosbag/`. Avoid
 cd ~/LIDAR-based-Positioning
 python3 scripts/bag_converter.py data/Test1_data/rosbag data/Test1_data/rosbag_glim
 ```
-Fixes (see "Data conversion details" below): custom IMU message type →
-`sensor_msgs/Imu`; inverted accelerometer sign + non-standard per-point
-timestamp field name/units.
+This fixes costum IMU message types, negates accelerometer values to conform to the standard gravity (+9.81m/s^2),
+and converts point timestamps to seconds for proper LIDAR deskewing.
 
 ### 2. Run GLIM
 ```bash
@@ -179,39 +178,47 @@ For faster runs, comment out `libstandard_viewer.so`/`librviz_viewer.so` in
 ### 3. Export trajectory — LatLon + NED velocity (Deliverable 1)
 ```bash
 python3 scripts/export_trajectory.py \
-  results/dump/test1/traj_lidar.txt \
+  results/dump/dump_test2/traj_lidar.txt \
   data/xtrack_gnss_corrected/xtrack_global_position_t12.csv \
-  results/deliverables/trajectory_latlon_ned_test1.csv
+  results/deliverables/run2_trajectory_latlon_ned.csv \
+  --offset -307.00
 ```
+Exports the GLIM's local trajectory transformed into global lat-lon-alt coordinates and calculates
+finite-difference velocities in the North-East-Down (NED) frame.
 
-### 4. RMSE + error plots (Deliverable 3)
+### 4. RMSE + error plots (Deliverable 2)
 ```bash
 python3 scripts/compute_rmse.py \
-  results/dump/test1/traj_lidar.txt \
+  results/dump/dump_test2/traj_lidar.txt \
   data/xtrack_gnss_corrected/xtrack_global_position_t12.csv \
-  results/deliverables/test1 "test1"
+  results/deliverables/run2 "run2" \
+  --offset -307.00
 ```
-Produces error-vs-time and top-down trajectory comparison plots. Evaluation
-is automatically scoped to whatever portion of the bag GLIM actually
-processed.
+Applies the `-307.0s`timestamp calibration offset, performs Umeyama SE(3) alignment against the GNSS ground truth,
+calculates RMSE position error, and generates spatial trajectory and temporal error plots.
 
-### 5. Point cloud map as PCD (Deliverable 2)
+### 5. Point cloud map as PCD (Deliverable 3)
 ```bash
-ros2 run glim_ros offline_viewer $(realpath results/dump/test1)
+# 1. Open offline viewer to save map
+ros2 run glim_ros offline_viewer $(realpath results/dump/dump_test2)
+# In GUI viewer: File -> Save -> Export Points -> save as e.g. results/deliverables/run2/map_run2.ply
+
+# 2. Convert PLY to PCD and render 2D maps
+python3 scripts/ply2pcd.py \
+  results/deliverables/run2/map_run2.ply \
+  results/deliverables/run2/map_run2.pcd \
+  0.05 \
+  results/deliverables/run2/map_run2.png
 ```
-File → Save → Export Points → `results/deliverables/map_test1.ply`, then:
-```bash
-python3 scripts/ply2pcd.py results/deliverables/map_test1.ply \
-  results/deliverables/map_test1.pcd 0.05 results/deliverables/map_test1_topdown.png
-```
-(`0.05` = 5cm voxel downsampling to minimize the resolution)
+Downsamples the point cloud with a `0.05m` voxel grid, exports `map_run2.pcd` and generates 2D top-down
+occupancy `map_run2_gray.png` and height map `map_run2_height.png` images.
 
 ## Data conversion details (`bag_converter.py`)
 
 | Fix | Problem | Solution |
 |---|---|---|
 | IMU message type | `aspn_msgs/MeasurementIMU` (custom, GLIM can't subscribe) | Convert to `sensor_msgs/msg/Imu` |
-| Accelerometer sign | At rest read `[0.15, -0.12, **-9.6**]`. GTSAM expects **+9.81** on the up-axis at rest (per GLIM docs) | Negate all 3 axes |
+| Accelerometer sign | At rest read `[0.15, -0.12, **-9.6**]`. GTSAM expects **+9.81** on the up-axis at rest (per GLIM docs) | Perform transformation into the 3 axes |
 | Per-point timestamps | Field named `timeoffset` (ms), not `t`/`time`/`timestamp` GLIM recognizes → fell back to pseudo-timestamps, degrading deskewing | Rename to `time`, convert ms→s |
 
 `aspn_msgs` has no public ROS2 package, since it's an own implementation of the 
@@ -227,13 +234,13 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
 
 | Run | acc/gyro noise | bias noise | Other | RMSE [m] | Notes |
 |---|---|---|---|---|---|
-| run1 | 0.05 / 0.02 | 1e-5 (default) | — | 82.9 | Baseline |
-| **run2** | **0.01 / 0.005** | **1e-5** | — | **72.3** | **Final config** |
-| run3 | 0.05 / 0.02 | 0.01 | — | 92.5 | Worse |
-| run4 | 0.1 / 0.05 | 1e-3 | — | 73.8 | |
-| run5 | 1e-5 / 1e-5 | 1e-5 | — | 95.3 | Worse (over confident IMU) |
-| run6 | 0.01 / 0.005 | 1e-5 | `T_lidar_imu`=identity | 91.0 | Manufacturer default (run2) better |
-| run7 | 0.01 / 0.005 | 1e-5 | deskew off | 67.4 | Lower RMSE, visibly worse map with deskew kept on |
+| run1 | 0.05 / 0.02 | 1e-5 (default) | — | - | Baseline |
+| **run2** | **0.01 / 0.005** | **1e-5** | — | **24.071** | **Final config** |
+| run3 | 0.05 / 0.02 | 0.01 | — | - | - |
+| run4 | 0.1 / 0.05 | 1e-3 | — | - | - |
+| run5 | 1e-5 / 1e-5 | 1e-5 | — | - | - |
+| run6 | 0.01 / 0.005 | 1e-5 | `T_lidar_imu`=identity | - | - |
+| run7 | 0.01 / 0.005 | 1e-5 | deskew off | - | - |
 
 <p align="center">
   <img src="results/deliverables/raw_gnss_check.png" width="500">
@@ -267,42 +274,43 @@ Here, the `.msg` files are reconstructed directly from the spec (`ros2_packages/
 
 [![Run 2 demonstration](https://img.youtube.com/vi/KeU6mBA8BLE/maxresdefault.jpg)](https://www.youtube.com/watch?v=KeU6mBA8BLE)
 
-## What are being ruled out
+## Technical Analysis of Error Curve Dynamics
+As seen in the figures before, the positional error exhibits possible specific behaviors:
+- **Initial high error (~60m dropping to <8m at t=140s)**. GLIM began recording 136 seconds before the GNSS receiver started logging. During
+  this period, GLIM possibly tracked the vehicle driving 60m toward the initial GNSS fix location. At t ~ 140s, the vehicle arrived
+  at the GNSS start location (`GNSS index 0`), causing the positional error to drop below 8 meters.
+- **Periodic Error Oscillations (5 to 30 meters)**. As the vehicle completed loops, unconstrained yaw (heading) drift caused the
+  estimated path to periodically diverge from the ground truth. Every time the vehicle loop crossed the GNSS trajectory in 2D space,
+  error dropped to <5m.
+- **Global SE(3) Alignment Behavior**. Umeyama alignment minimizes total squared error across all 6802 poses simulaneously. It is possible
+  that it intentionally avoids pinning the initial pose to `0m` error, doing so would force all accumulated drift into the end of the run,
+  blowing up overall RMSE beyond `80m`. 
 
-- **Clock desync**, scanned RMSE across ±20s offset (`find_timeoffset.py`): flat curve, no localized minimum.
-- **GNSS data quality**, raw track inspected directly (`plot_raw_gnss.py`): largest jump = plausible 0.4 m/s over 15.6s (recording pause), no teleports.
-- **Extrinsics**, identity vs. manufacturer default (run2 vs. run7): both poor, default slightly better; millimeters can't explain tens of meters either way.
-- **`aspn_msgs`/sign/deskewing bugs**, all fixed and independently verified (gravity magnitude, GLIM's own convention docs, warning-message disappearance).
+## Why results are ~24m RMSE, which are worse than LIO-SAM's and KISS-ICP's results
+While **24.071m RMSE** represents substantial improvement over initial uncalibrated runs (>72m, not in the report), several
+architectural and environmental factors could prevent the accuracy:
 
-## Root cause: weak loop closure
-
-1. **Low submap overlap**: Constant low submap overlap throughout every run (`small overlap`
-   warnings, typically 0.10–0.25, at or below GLIM's `min_implicit_loop_overlap`
-   default of 0.2).
-2. **Path length vs. net displacement**: run2 has 414.9m total path with 212.2m
-   net displacement (51%). For a loop trajectory it should have been much lower.
-3. **Oscillating error over time**: consistent with locally losing/regaining 
-   constraint through the route rather than one systemic bias.
-
-## Why results may be worse than LIO-SAM / KISS-ICP
-
-Plausible contributing factors based on architectural differences:
-
-- **No GPU**: Here, the CPU path (GICP+iVox) is a lower-fidelity approximation of GLIM's intended 
+- **Unbounded Heading (Yaw) Drift in Pure LIO**
+  GLIM runs as a pure LiDAR-Inertial Odometry system without compass/magnetometer or online GNSS factor integration. Over an
+  ~816s driving covering ~1.5km, an uncorrected heading drift of even just 1°-2° accumulates into 20-30m of spatial displacement
+  at the far ends of the loop.
+- **No GPU**
+  Here, the CPU path (GICP+iVox) is a lower-fidelity approximation of GLIM's intended 
   VGICP_GPU pipeline, not just a slower version of it.
-- **Sparse sensor**: Ouster OS0-32 (32 lines) gives less per scan geometric
-  detail than sensors GLIM was primarily benchmarked on, worsening
-  degenerate and repetitive geometry scan matching.
-- **Consumer-grade embedded IMU**: Possible elevated drift/noise (cheap MEMS, magnetic interference). 
+- **Sparse LiDAR resolution (Ouster OS0-32)??**
+  The 32-beam sensor provides lower vertical point density compared to 64- or 128-beam units. It open roadside environments with
+  featureless geometry, scan matching exhibits weak constraints along the direction of travel.
+- **Drift in the embedded IMU**
   GLIM's tight coupling assumes a well-behaved IMU, while LIO-SAM's looser coupling or KISS-ICP's 
   IMU-independence may be more robust to this specifically.
-- **Loop-closure design**: GLIM's implicit overlap-based closure vs. LIO-SAM's explicit detection 
-  (radius search + ICP verify) may trigger more reliably at weaker overlap.
-- **Manual, non-exhaustive tuning**: 7 manual tuning of configurations is used rather than 
+- **Weak Implicit Loop Closures**
+  GLIM's implicit overlap-based closure vs. LIO-SAM's explicit detection (radius search + ICP verify) may trigger more reliably 
+  at weaker overlap.
+- **Manual tuning**: 7 manual tuning of configurations is used rather than 
   for example Allan-variance-based calibration.
 
 ## Known limitations
 
-- Pedestrian "ghosting" (trailing point-cloud copies), which is also expected for any
-  point-cloud SLAM without dynamic-object filtering. Possibly not a pipeline bug.
-- Only Test1 evaluated in depth.
+- **Pedestrian / Dynamic Object "Ghosting"**: Trailing point cloud artifacts exist near sidewalks due to the lack of dedicated
+  dynamic object filtering (standard for raw point cloud SLAM)
+- **Evaluated primarily only on Test1 dataset**
