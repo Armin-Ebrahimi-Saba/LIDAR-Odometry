@@ -73,7 +73,7 @@ Follow these steps to run the SLAM pipeline on your machine:
    Execute the conversion and synchronization:
    ```bash
    python3 bag_preparation/convert_bag.py
-   rosbags-convert bags/rosbag_new --dst bags/rosbag_new.bag
+   rosbags-convert --src bags/rosbag_new --dst bags/rosbag_new.bag
    python3 bag_preparation/fix_ouster_bag.py
    ```
    This will output a final, synchronized ROS 1 bag named `lio_sam_ready.bag` inside your `bags/` directory.
