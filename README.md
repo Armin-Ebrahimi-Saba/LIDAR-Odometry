@@ -177,7 +177,7 @@ In contrast, relying exclusively on IMU and LiDAR data yields a highly precise a
 
 An analysis of these results (demonstrated in the video below) reveals that at approximately minute 7 in the rosbag data, the sensor undergoes a rapid rotation that cannot be adequately compensated for by the low-cost IMU. Consequently, the GNSS-denied LIO-SAM configuration is unable to recover from the resulting point cloud distortion, whereas the GNSS-assisted configuration forces the system back onto the correct global path.
 
-<img width="80" height="60" alt="xtrack_turn" src="https://github.com/user-attachments/assets/ab03ff8f-522e-4d7b-a0c1-98abcd55d8d4" />
+<img width="800" height="600" alt="xtrack_turn" src="https://github.com/user-attachments/assets/ab03ff8f-522e-4d7b-a0c1-98abcd55d8d4" />
 
 The deviations and subsequent changes in the path can be explained by the following factors:
 
