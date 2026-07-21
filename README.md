@@ -133,9 +133,9 @@ When the vehicle starts, it is stationary for a significant period. The raw GNSS
 
 ## 3. Results & Evaluation
 
-The final evaluation was conducted using custom Python scripts running outside of ROS, relying on standard libraries to compare the drifting trajectories against the Ground Truth GNSS data. *(Note: The raw data, outputs, and evaluation scripts have been omitted from this slimmed-down repository delivery. All plots are contained in a result folder).*
+The final evaluation was conducted using custom Python scripts running outside of ROS, relying on standard libraries to compare the drifting trajectories against the Ground Truth GNSS data. *(Note: The raw data and outputs have been omitted from this slimmed-down repository delivery. All plots scripts are contained a folder).*
 
-###Produced point clouds for Test 1  
+### Produced point clouds for Test 1  
 <img width="4811" height="2966" alt="my_comparison" src="https://github.com/user-attachments/assets/4b1a37b1-c5e9-4614-8e5b-6755b14247e7" />
 
 ### 3.1 Evaluation Pipeline
@@ -143,4 +143,12 @@ The final evaluation was conducted using custom Python scripts running outside o
 
 ### 3.2 Findings
 
+**Impact of GNSS Data on Mapping Accuracy**
 
+Comparing the generated point clouds (as seen in the visualization above) reveals a significant difference in map consistency when GNSS data is omitted, particularly during high-dynamic maneuvers:
+
+1. **Trajectory Deviation and "Curving":** The point cloud generated purely from LiDAR and IMU (without GNSS data) exhibits a sharp, incorrect bend in the trajectory that does not exist in reality (as verified by the GNSS-assisted map).
+2. **Failure during Fast Rotation (Perceptual Aliasing):** LIO-SAM relies on feature-based scan matching (a variant of the Iterative Closest Point or ICP algorithm). It extracts and matches geometric features like edges and planar surfaces between consecutive LiDAR scans to estimate odometry. During the rapid rotation around the robot's vertical axis, the spatial overlap between consecutive scans is drastically reduced. In this scenario, the algorithm likely encountered similar-looking edges in the environment (perceptual aliasing) and incorrectly associated them. This wrong data association forces a completely incorrect heading estimation, causing the mapped trajectory to diverge and "curve" away.
+3. **IMU Pre-integration Limits:** During rapid rotations, it seems that low-cost IMUs accumulate significant noise and their pre-integration drifts. LIO-SAM relies heavily on the IMU to de-skew the LiDAR sweeps and to provide an initial guess for the scan-matching algorithm. If the IMU provides a faulty initial rotation guess due to high error tolerance limits or noise, the ICP algorithm will converge into a wrong local minimum, matching the wrong geometric features.
+4. **Motion Skew/Blur:** A LiDAR takes time to complete a 360-degree sweep (typically 100ms). Fast rotation during this sweep distorts the point cloud (motion skew). If the IMU data is noisy, the de-skewing process fails, causing the scan to warp. Warped point clouds cannot be matched accurately against the existing map, compounding the registration error.
+5. **GNSS as a Global Constraint:** The GNSS data provides an absolute global reference that corrects these local heading and translation errors. Without it, the system has no way to correct a false heading induced by a bad scan match during a rapid rotation, resulting in permanent map distortion.
