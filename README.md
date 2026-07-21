@@ -5,8 +5,6 @@
 src="https://github.com/user-attachments/assets/8927424c-57e8-4176-9076-d3b6719260ea"
 loop autoplay muted controls></video>
 
-
-
 ---
 
 ## 1. Code Architecture
@@ -141,6 +139,7 @@ The final evaluation was conducted using custom Python scripts running outside o
 
 ### 3.2 Findings
 
+<img width="8" height="6" alt="xtrack_turn" src="https://github.com/user-attachments/assets/ab03ff8f-522e-4d7b-a0c1-98abcd55d8d4" />
 **Impact of GNSS Data on Mapping Accuracy**
 
 Comparing the generated point clouds (as seen in the visualization above) reveals a significant difference in map consistency when GNSS data is omitted, particularly during high-dynamic maneuvers:
