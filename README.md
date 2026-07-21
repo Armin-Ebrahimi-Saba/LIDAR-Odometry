@@ -159,36 +159,25 @@ The 6-axis LIO-SAM framework was successfully implemented and evaluated across t
 When incorporating Ouster GNSS data, the global trajectory clearly guided the map generation. While it appeared as though the path was derived directly from the GNSS readings, LIO-SAM effectively utilized LiDAR and IMU data to filter out noise by recognizing large-scale structures, such as the architecture building near Ernst-Reuter-Platz. This resulted in a well-balanced approach: following the global GNSS trajectory while fine-tuning the local path with LiDAR and IMU measurements. As illustrated in the plots, GNSS integration yielded an excellent trajectory approximation that closely matched the ground truth.
 
 Conversely, omitting the GNSS data resulted in noticeable trajectory drift over time. This is expected, as the Ouster sensor's built-in IMU is not survey-grade and is therefore susceptible to accumulated drift. Furthermore, at a specific point during the test, the entire map's general structure severely deviates—an anomaly triggered by a specific event that will be analyzed in Chapter 3.4.
-
-"Picture of paths here"
+<img width="1054" height="902" alt="path_map" src="https://github.com/user-attachments/assets/94b82040-445d-4ba7-9879-63eafbd27e23" />
 
 These observations are quantitatively supported by the Root Mean Square Error (RMSE) analysis.
-
-"Picture of RMSE here"
+<img width="3600" height="1800" alt="rmse_comparison" src="https://github.com/user-attachments/assets/bca603e1-fdce-4d1e-b1f2-15a52b1b46ff" />
 
 ### 3.3 Maps
-
-"short videos here"
-
 Because GNSS data was heavily prioritized in our configuration, the map generation was strictly constrained to the global trajectory. This rigid constraint occasionally forced the point clouds apart, resulting in a more scattered and less cohesive 3D map.
 
 <img width="4811" height="2966" alt="my_comparison" src="https://github.com/user-attachments/assets/4b1a37b1-c5e9-4614-8e5b-6755b14247e7" />
 
 As a result, only large-scale structures and general building outlines are clearly visible, which LIO-SAM appears to leverage for global orientation.
 
-"Pictures of general buildings"
-
 In contrast, relying exclusively on IMU and LiDAR data yields a highly precise and detailed 3D map. Not only are building facades sharply captured, but fine details, such as the textures of trees, are also clearly visible.
-
-"picture of trees"
 
 ### 3.4 Reason for Hard Deviation of LIO-SAM without GNSS
 
-An analysis of these results (demonstrated in the videos below) reveals that at time **[XXX]** in the rosbag data, the sensor undergoes a rapid rotation that cannot be adequately compensated for by the low-cost IMU. Consequently, the GNSS-denied LIO-SAM configuration is unable to recover from the resulting point cloud distortion, whereas the GNSS-assisted configuration forces the system back onto the correct global path.
+An analysis of these results (demonstrated in the video below) reveals that at approximately minute 7 in the rosbag data, the sensor undergoes a rapid rotation that cannot be adequately compensated for by the low-cost IMU. Consequently, the GNSS-denied LIO-SAM configuration is unable to recover from the resulting point cloud distortion, whereas the GNSS-assisted configuration forces the system back onto the correct global path.
 
 <img width="80" height="60" alt="xtrack_turn" src="https://github.com/user-attachments/assets/ab03ff8f-522e-4d7b-a0c1-98abcd55d8d4" />
-
-"Videos of handeling"
 
 The deviations and subsequent changes in the path can be explained by the following factors:
 
